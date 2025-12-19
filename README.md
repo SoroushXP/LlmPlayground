@@ -1,4 +1,4 @@
-# LlmConnector
+# LlmPlayground
 
 A .NET 9 library for connecting to various LLM (Large Language Model) APIs with a unified interface.
 
@@ -18,19 +18,20 @@ A .NET 9 library for connecting to various LLM (Large Language Model) APIs with 
 ## Project Structure
 
 ```
-LlmConnector/
-├── LlmConnector.sln
-├── LlmConnector.Core/           # Class Library
+LlmPlayground/
+├── LlmPlayground.sln
+├── LlmPlayground.Core/          # Class Library
 │   ├── ILlmProvider.cs          # Base interface for all LLM providers
 │   ├── OpenAiProvider.cs        # OpenAI/ChatGPT provider
 │   ├── OllamaProvider.cs        # Ollama provider
 │   ├── LmStudioProvider.cs      # LM Studio provider
 │   └── LocalLlmProvider.cs      # Local GGUF model provider
-├── LlmConnector.Console/        # Console Demo App
+├── LlmPlayground.Console/       # Console Demo App
 │   ├── Program.cs
 │   └── appsettings.json
-└── LlmConnector.Tests/          # Unit Tests
-    └── *.Tests.cs
+└── Tests/                       # Unit Tests
+    ├── LlmPlayground.Core.Tests/
+    └── LlmPlayground.Console.Tests/
 ```
 
 ## Getting Started
@@ -43,14 +44,14 @@ LlmConnector/
 ### Installation
 
 ```bash
-cd LlmConnector
+cd LlmPlayground
 dotnet restore
 dotnet build
 ```
 
 ### Configuration
 
-Edit `LlmConnector.Console/appsettings.json`:
+Edit `LlmPlayground.Console/appsettings.json`:
 
 ```json
 {
@@ -312,7 +313,7 @@ These options can be passed to `CompleteAsync()` and `CompleteStreamingAsync()`:
 ### Running
 
 ```bash
-cd LlmConnector.Console
+cd LlmPlayground.Console
 dotnet run
 ```
 
