@@ -185,6 +185,7 @@ public class PrologService : IPrologService
             Success = result.Success,
             Output = result.Output,
             Error = string.IsNullOrEmpty(result.Error) ? null : result.Error,
+            Warnings = string.IsNullOrEmpty(result.Warnings) ? null : result.Warnings,
             ExitCode = result.ExitCode
         };
     }

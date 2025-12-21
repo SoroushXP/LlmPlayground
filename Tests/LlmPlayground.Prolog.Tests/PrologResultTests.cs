@@ -15,6 +15,7 @@ public class PrologResultTests
         result.Success.Should().BeFalse();
         result.Output.Should().BeEmpty();
         result.Error.Should().BeEmpty();
+        result.Warnings.Should().BeEmpty();
         result.ExitCode.Should().Be(0);
     }
 
@@ -27,6 +28,7 @@ public class PrologResultTests
             Success = true,
             Output = "test output",
             Error = "test error",
+            Warnings = "test warning",
             ExitCode = 1
         };
 
@@ -34,6 +36,7 @@ public class PrologResultTests
         result.Success.Should().BeTrue();
         result.Output.Should().Be("test output");
         result.Error.Should().Be("test error");
+        result.Warnings.Should().Be("test warning");
         result.ExitCode.Should().Be(1);
     }
 

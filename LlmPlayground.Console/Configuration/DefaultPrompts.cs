@@ -44,10 +44,19 @@ public static class DefaultPrompts
         Requirements:
         - Use first-order (level-one) logic only - basic facts and rules
         - Include clear comments explaining the game logic
-        - Define a main/0 predicate that runs the game and prints output using write/1 and nl/0
-        - Make the game self-contained and runnable
         - Use only safe predicates (no file I/O, shell commands, or system calls)
-        - The code should demonstrate the game's logic with example scenarios
+        - Prefix singleton variables with underscore (e.g., _Unused) to avoid warnings
+
+        CRITICAL - The main/0 predicate MUST:
+        1. Print a title/header for the game
+        2. Display the initial facts and setup
+        3. Run AT LEAST 3-5 example queries that demonstrate the game logic
+        4. Show the query being asked and its result (e.g., "Query: Who is the parent of X? Answer: john")
+        5. Demonstrate deduction/inference by showing how rules derive new facts
+        6. Produce at least 10-15 lines of meaningful output
+
+        The main/0 predicate should NOT just print a simple message and exit.
+        It must actively demonstrate the game by running findall/3, member/2, or direct queries and printing results.
 
         Output ONLY the Prolog code, wrapped in ```prolog code blocks.
         """;
@@ -61,11 +70,20 @@ public static class DefaultPrompts
 
         {GameIdea}
 
-        The code should:
-        1. Define all necessary facts and rules
-        2. Include a main/0 predicate that demonstrates the game by running sample queries and printing results
-        3. Use write/1 and nl/0 for output
-        4. Be self-contained and runnable
+        The code MUST:
+        1. Define all necessary facts and rules with proper Prolog syntax
+        2. Prefix singleton variables with underscore to avoid warnings
+        3. Include a main/0 predicate that ACTIVELY DEMONSTRATES the game:
+           - Print a game title/header
+           - Show the game setup (facts, entities, relationships)
+           - Run 3-5 example queries using the rules you defined
+           - Display each query and its results clearly
+           - Show logical deductions or inferences
+           - Produce at least 10-15 lines of output
+        4. Use write/1, writeln/1, format/2, and nl/0 for output
+        5. Use findall/3 or forall/2 to collect and display query results
+
+        DO NOT just print a completion message. The main/0 must run actual queries and show results.
 
         Output the complete Prolog code.
         """;
@@ -74,16 +92,22 @@ public static class DefaultPrompts
     /// Default system prompt for fixing Prolog code errors.
     /// </summary>
     public const string PrologFixSystemPrompt = """
-        You are an expert SWI-Prolog debugger. Your task is to fix Prolog code that has syntax errors or runtime errors.
-        
+        You are an expert SWI-Prolog debugger. Your task is to fix Prolog code that has errors or produces insufficient output.
+
         Requirements:
         - Fix ALL syntax errors and runtime errors
         - Ensure all predicates that are called are properly defined
         - Use proper Prolog syntax (atoms in single quotes if needed, proper operators, etc.)
+        - Prefix singleton variables with underscore (e.g., _Unused) to avoid warnings
         - Keep the game logic intact while fixing the errors
         - Use only safe predicates (no file I/O, shell commands, or system calls)
-        - Make sure the main/0 predicate works correctly
-        
+
+        CRITICAL - The main/0 predicate MUST:
+        - Run actual queries and display their results (not just print static messages)
+        - Produce at least 10-15 lines of meaningful output
+        - Show query results using findall/3, forall/2, or direct predicate calls
+        - Demonstrate the game logic by showing relationships, deductions, and answers
+
         Output ONLY the complete fixed Prolog code, wrapped in ```prolog code blocks.
         Do not include explanations outside the code block.
         """;

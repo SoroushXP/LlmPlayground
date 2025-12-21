@@ -95,7 +95,16 @@ public sealed class GameGeneratorService : IGameGeneratorService
                     executionSuccess = executionResult.Success;
                     executionError = executionResult.Error;
 
-                    if (executionResult.Success || string.IsNullOrWhiteSpace(executionResult.Error))
+                    // Validate output is meaningful - a proper game demo should have substantial output
+                    var outputValidation = ValidateGameOutput(executionResult.Output);
+                    if (!outputValidation.IsValid)
+                    {
+                        executionSuccess = false;
+                        executionError = outputValidation.Error;
+                    }
+
+                    // Only stop if execution was truly successful with meaningful output
+                    if (executionResult.Success && outputValidation.IsValid)
                     {
                         break;
                     }
@@ -106,10 +115,42 @@ public sealed class GameGeneratorService : IGameGeneratorService
                         break;
                     }
 
+                    // Build error message for the LLM
+                    string errorForFix;
+
+                    if (!outputValidation.IsValid && executionResult.Success)
+                    {
+                        // Code ran but output was insufficient - tell LLM exactly what's wrong
+                        errorForFix = outputValidation.Error!;
+                        if (!string.IsNullOrWhiteSpace(executionResult.Output))
+                        {
+                            errorForFix += $"\n\nCurrent output produced:\n{executionResult.Output}";
+                        }
+                    }
+                    else if (string.IsNullOrWhiteSpace(executionResult.Error))
+                    {
+                        // Prolog failed silently (main predicate returned false or exited with error code)
+                        errorForFix = $"The Prolog code failed to execute successfully. Exit code: {executionResult.ExitCode}. " +
+                                      "The main/0 predicate likely failed (returned false) due to logical errors in the rules or facts. " +
+                                      "Check that all predicates are correctly defined, all variables are properly bound, and the logical constraints are satisfiable.";
+                        if (!string.IsNullOrWhiteSpace(executionResult.Output))
+                        {
+                            errorForFix += $"\n\nPartial output before failure:\n{executionResult.Output}";
+                        }
+                    }
+                    else
+                    {
+                        // Actual error from Prolog
+                        errorForFix = executionResult.Error;
+                    }
+
+                    // Update executionError for display purposes
+                    executionError = errorForFix;
+
                     ConsoleStyles.Warning($"Execution failed, attempting to fix (attempt {attempt + 1}/{_settings.MaxFixRetries})...");
 
                     fixAttempts++;
-                    var fixedCode = await FixPrologCodeAsync(currentCode, executionResult.Error, cancellationToken);
+                    var fixedCode = await FixPrologCodeAsync(currentCode, errorForFix, cancellationToken);
 
                     if (fixedCode == currentCode)
                     {
@@ -275,7 +316,8 @@ public sealed class GameGeneratorService : IGameGeneratorService
         {
             Success = response.Success,
             Output = response.Output,
-            Error = response.Error
+            Error = response.Error,
+            ExitCode = response.ExitCode
         };
     }
 
@@ -304,6 +346,52 @@ public sealed class GameGeneratorService : IGameGeneratorService
         public bool Success { get; init; }
         public string Output { get; init; } = string.Empty;
         public string? Error { get; init; }
+        public int ExitCode { get; init; }
+    }
+
+    private static (bool IsValid, string? Error) ValidateGameOutput(string output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return (false, "The main/0 predicate produced no output. It should demonstrate the game by running queries and displaying results using write/1 and nl/0.");
+        }
+
+        // Count meaningful lines (non-empty, non-whitespace-only)
+        var lines = output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+                          .Where(line => !string.IsNullOrWhiteSpace(line))
+                          .ToList();
+
+        // A proper game demonstration should have at least 5 lines of output
+        // (title, some facts/rules demonstration, query results, etc.)
+        const int MinimumLines = 5;
+        if (lines.Count < MinimumLines)
+        {
+            return (false, $"The main/0 predicate only produced {lines.Count} line(s) of output. A proper game demonstration should show the game logic in action with example queries, their results, and explanations. It needs at least {MinimumLines} lines demonstrating facts, rules, and query results.");
+        }
+
+        // Check if output appears to show actual query/logic demonstration
+        // Look for patterns that suggest actual game logic is being demonstrated
+        var hasQueryResults = lines.Any(line =>
+            line.Contains("=") ||           // Prolog unification results
+            line.Contains("true") ||         // Boolean results
+            line.Contains("false") ||
+            line.Contains("yes") ||
+            line.Contains("no") ||
+            line.Contains(":") ||            // Relationships like "X : Y" or labels
+            line.Contains("->") ||           // Implications
+            line.Contains("is in") ||        // Common game output
+            line.Contains("located") ||
+            line.Contains("found") ||
+            line.Contains("solution") ||
+            line.Contains("answer") ||
+            line.Contains("result"));
+
+        if (!hasQueryResults)
+        {
+            return (false, "The main/0 predicate output doesn't appear to demonstrate actual game logic. It should run example queries showing relationships, deductions, or solutions - not just print static messages.");
+        }
+
+        return (true, null);
     }
 
     private sealed class TimingCollector

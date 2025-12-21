@@ -43,9 +43,15 @@ public record PrologResponse
     public string Output { get; init; } = string.Empty;
 
     /// <summary>
-    /// Any error output from the Prolog interpreter.
+    /// Any error output from the Prolog interpreter (excluding warnings).
     /// </summary>
     public string? Error { get; init; }
+
+    /// <summary>
+    /// Warning messages from the Prolog interpreter (like singleton variable warnings).
+    /// These do not cause execution to fail.
+    /// </summary>
+    public string? Warnings { get; init; }
 
     /// <summary>
     /// The exit code from the Prolog process.

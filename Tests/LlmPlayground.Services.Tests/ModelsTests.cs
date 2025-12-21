@@ -163,6 +163,7 @@ public class ModelsTests
             response.Success.Should().BeFalse();
             response.Output.Should().BeEmpty();
             response.Error.Should().BeNull();
+            response.Warnings.Should().BeNull();
             response.ExitCode.Should().Be(0);
         }
     }

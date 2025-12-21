@@ -249,9 +249,16 @@ public class PrologRunner
             await process.WaitForExitAsync(cancellationToken);
 
             result.Output = await outputTask;
-            result.Error = await errorTask;
+            var stderr = await errorTask;
             result.ExitCode = process.ExitCode;
-            result.Success = process.ExitCode == 0 && string.IsNullOrEmpty(result.Error);
+
+            // Separate warnings from actual errors
+            var (warnings, errors) = SeparateWarningsFromErrors(stderr);
+            result.Warnings = warnings;
+            result.Error = errors;
+
+            // Success if exit code is 0 and there are no actual errors (warnings are OK)
+            result.Success = process.ExitCode == 0 && string.IsNullOrEmpty(errors);
         }
         catch (OperationCanceledException)
         {
@@ -267,6 +274,50 @@ public class PrologRunner
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Separates Prolog warnings from actual errors in stderr output.
+    /// </summary>
+    /// <param name="stderr">The stderr content from SWI-Prolog.</param>
+    /// <returns>A tuple with (warnings, errors) where warnings contains warning lines and errors contains actual error lines.</returns>
+    private static (string warnings, string errors) SeparateWarningsFromErrors(string stderr)
+    {
+        if (string.IsNullOrWhiteSpace(stderr))
+            return (string.Empty, string.Empty);
+
+        var lines = stderr.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+        var warningLines = new List<string>();
+        var errorLines = new List<string>();
+
+        bool inWarningBlock = false;
+
+        foreach (var line in lines)
+        {
+            // SWI-Prolog warnings start with "Warning:" (possibly with a file path before)
+            // They may span multiple lines with continuation (indented lines after "Warning:")
+            if (line.Contains("Warning:", StringComparison.OrdinalIgnoreCase))
+            {
+                inWarningBlock = true;
+                warningLines.Add(line);
+            }
+            else if (inWarningBlock && line.StartsWith("    "))
+            {
+                // Continuation of a warning (indented lines)
+                warningLines.Add(line);
+            }
+            else
+            {
+                // Not a warning - it's an actual error
+                inWarningBlock = false;
+                errorLines.Add(line);
+            }
+        }
+
+        var warnings = warningLines.Count > 0 ? string.Join(Environment.NewLine, warningLines) : string.Empty;
+        var errors = errorLines.Count > 0 ? string.Join(Environment.NewLine, errorLines) : string.Empty;
+
+        return (warnings, errors);
     }
 }
 
@@ -286,9 +337,15 @@ public class PrologResult
     public string Output { get; set; } = string.Empty;
 
     /// <summary>
-    /// Any error output from the Prolog interpreter.
+    /// Any error output from the Prolog interpreter (excluding warnings).
     /// </summary>
     public string Error { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Warning messages from the Prolog interpreter (like singleton variable warnings).
+    /// These do not cause execution to fail.
+    /// </summary>
+    public string Warnings { get; set; } = string.Empty;
 
     /// <summary>
     /// The exit code from the Prolog process.
