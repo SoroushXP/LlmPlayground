@@ -90,30 +90,67 @@ public sealed class GameGeneratorService : IGameGeneratorService
             string? executionOutput = null;
             bool? executionSuccess = null;
             string? executionError = null;
+            int fixAttempts = 0;
             
             var generatedFilePath = await SavePrologCodeAsync(prologCode, cancellationToken);
             _logger.LogInformation("Generated Prolog file: {Path}", generatedFilePath);
 
-            // Step 5: Execute the Prolog code (if requested)
+            // Step 5: Execute the Prolog code (if requested) with retry loop for fixing errors
             if (request.ExecuteGame)
             {
-                _logger.LogDebug("Executing Prolog code...");
                 timings.StartPhase("Execution");
+                var currentCode = prologCode;
+                var goal = request.PrologGoal ?? _settings.DefaultPrologGoal;
 
-                var executionResult = await ExecutePrologCodeAsync(
-                    generatedFilePath,
-                    request.PrologGoal ?? _settings.DefaultPrologGoal,
-                    cancellationToken);
+                for (int attempt = 0; attempt <= _settings.MaxFixRetries; attempt++)
+                {
+                    _logger.LogDebug("Executing Prolog code (attempt {Attempt})...", attempt + 1);
+
+                    var executionResult = await ExecutePrologCodeAsync(generatedFilePath, goal, cancellationToken);
+
+                    executionOutput = executionResult.Output;
+                    executionSuccess = executionResult.Success;
+                    executionError = executionResult.Error;
+
+                    // If successful or no error to fix, we're done
+                    if (executionResult.Success || string.IsNullOrWhiteSpace(executionResult.Error))
+                    {
+                        _logger.LogDebug("Prolog execution succeeded on attempt {Attempt}", attempt + 1);
+                        break;
+                    }
+
+                    // If we've exhausted retries, stop
+                    if (attempt >= _settings.MaxFixRetries)
+                    {
+                        _logger.LogWarning(
+                            "Prolog execution failed after {Attempts} fix attempts. Last error: {Error}",
+                            fixAttempts, executionResult.Error);
+                        break;
+                    }
+
+                    // Try to fix the code using LLM
+                    _logger.LogInformation(
+                        "Prolog execution failed, attempting to fix (attempt {Attempt}/{Max}). Error: {Error}",
+                        attempt + 1, _settings.MaxFixRetries, executionResult.Error);
+
+                    fixAttempts++;
+                    var fixedCode = await FixPrologCodeAsync(currentCode, executionResult.Error, cancellationToken);
+
+                    if (fixedCode == currentCode)
+                    {
+                        _logger.LogWarning("LLM returned the same code, stopping fix attempts");
+                        break;
+                    }
+
+                    currentCode = fixedCode;
+                    prologCode = fixedCode;
+
+                    // Save the fixed code to file
+                    generatedFilePath = await SavePrologCodeAsync(fixedCode, cancellationToken);
+                    _logger.LogInformation("Saved fixed Prolog file: {Path}", generatedFilePath);
+                }
 
                 timings.EndPhase("Execution");
-
-                executionOutput = executionResult.Output;
-                executionSuccess = executionResult.Success;
-                executionError = executionResult.Error;
-
-                _logger.LogDebug(
-                    "Prolog execution completed with success: {Success}",
-                    executionSuccess);
             }
 
             totalStopwatch.Stop();
@@ -127,6 +164,7 @@ public sealed class GameGeneratorService : IGameGeneratorService
                 ExecutionSuccess = executionSuccess,
                 ExecutionError = executionError,
                 GeneratedFilePath = generatedFilePath,
+                FixAttempts = fixAttempts,
                 ProviderUsed = providerUsed,
                 Duration = totalStopwatch.Elapsed,
                 Timings = new GenerationTimings
@@ -202,6 +240,35 @@ public sealed class GameGeneratorService : IGameGeneratorService
         var response = await _llmService.ChatAsync(chatRequest, cancellationToken);
 
         // Extract the Prolog code from the response (may be in markdown code blocks)
+        return PrologCodeExtractor.ExtractPrologCode(response.Text);
+    }
+
+    private async Task<string> FixPrologCodeAsync(
+        string prologCode,
+        string errors,
+        CancellationToken cancellationToken)
+    {
+        var userPrompt = _settings.PrologFixUserPromptTemplate
+            .Replace("{PrologCode}", prologCode)
+            .Replace("{Errors}", errors);
+
+        var chatRequest = new ChatRequest
+        {
+            Messages =
+            [
+                new ChatMessageDto { Role = "system", Content = _settings.PrologFixSystemPrompt },
+                new ChatMessageDto { Role = "user", Content = userPrompt }
+            ],
+            Options = new InferenceOptionsDto
+            {
+                MaxTokens = _settings.DefaultPrologCodeMaxTokens,
+                Temperature = 0.3f // Lower temperature for more deterministic fixes
+            }
+        };
+
+        var response = await _llmService.ChatAsync(chatRequest, cancellationToken);
+
+        // Extract the Prolog code from the response
         return PrologCodeExtractor.ExtractPrologCode(response.Text);
     }
 

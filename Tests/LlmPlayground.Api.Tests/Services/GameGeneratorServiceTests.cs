@@ -367,5 +367,205 @@ public class GameGeneratorServiceTests
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => _sut.GenerateGameAsync(request, cts.Token));
     }
+
+    [Fact]
+    public async Task GenerateGameAsync_WhenExecutionFailsAndFixSucceeds_ReturnsSuccessWithFixAttempts()
+    {
+        // Arrange
+        var request = new GameGenerationRequest
+        {
+            ExecuteGame = true,
+            PrologGoal = "main"
+        };
+
+        _llmService.CurrentProvider.Returns("Ollama");
+        _llmService.SetProviderAsync(Arg.Any<LlmProviderType>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        // First two calls are for game idea and initial code generation
+        // Third call is for fixing the code
+        _llmService.ChatAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(
+                new CompletionResponse { Text = "A puzzle game", TokensGenerated = 20 },
+                new CompletionResponse { Text = "```prolog\nmain :- undefined_pred.\n```", TokensGenerated = 20 },
+                new CompletionResponse { Text = "```prolog\nmain :- write('Fixed!').\n```", TokensGenerated = 20 });
+
+        var executionCallCount = 0;
+        _prologService.ExecuteFileAsync(Arg.Any<PrologFileRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                executionCallCount++;
+                return executionCallCount == 1
+                    ? new PrologResponse { Success = false, Error = "Undefined procedure: undefined_pred/0", ExitCode = 1 }
+                    : new PrologResponse { Success = true, Output = "Fixed!", ExitCode = 0 };
+            });
+
+        // Act
+        var result = await _sut.GenerateGameAsync(request);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ExecutionSuccess.Should().BeTrue();
+        result.ExecutionOutput.Should().Be("Fixed!");
+        result.FixAttempts.Should().Be(1);
+        result.PrologCode.Should().Contain("Fixed!");
+    }
+
+    [Fact]
+    public async Task GenerateGameAsync_WhenMultipleFixAttemptsNeeded_TriesMultipleTimes()
+    {
+        // Arrange
+        var request = new GameGenerationRequest
+        {
+            ExecuteGame = true
+        };
+
+        _llmService.CurrentProvider.Returns("Ollama");
+        _llmService.SetProviderAsync(Arg.Any<LlmProviderType>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        // Game idea, initial code, first fix, second fix
+        _llmService.ChatAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(
+                new CompletionResponse { Text = "Game idea", TokensGenerated = 10 },
+                new CompletionResponse { Text = "```prolog\nmain :- error1.\n```", TokensGenerated = 10 },
+                new CompletionResponse { Text = "```prolog\nmain :- error2.\n```", TokensGenerated = 10 },
+                new CompletionResponse { Text = "```prolog\nmain :- write('Success!').\n```", TokensGenerated = 10 });
+
+        var executionCallCount = 0;
+        _prologService.ExecuteFileAsync(Arg.Any<PrologFileRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                executionCallCount++;
+                return executionCallCount switch
+                {
+                    1 => new PrologResponse { Success = false, Error = "Error 1", ExitCode = 1 },
+                    2 => new PrologResponse { Success = false, Error = "Error 2", ExitCode = 1 },
+                    _ => new PrologResponse { Success = true, Output = "Success!", ExitCode = 0 }
+                };
+            });
+
+        // Act
+        var result = await _sut.GenerateGameAsync(request);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ExecutionSuccess.Should().BeTrue();
+        result.FixAttempts.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task GenerateGameAsync_WhenMaxFixRetriesExhausted_ReturnsLastError()
+    {
+        // Arrange
+        var settings = new GameGenerationSettings
+        {
+            DefaultProviderString = "Ollama",
+            GameIdeaSystemPrompt = "Test",
+            GameIdeaUserPromptTemplate = "{ThemeSection} {DescriptionSection}",
+            PrologCodeSystemPrompt = "Test",
+            PrologCodeUserPromptTemplate = "{GameIdea}",
+            PrologFixSystemPrompt = "Fix",
+            PrologFixUserPromptTemplate = "{PrologCode} {Errors}",
+            MaxFixRetries = 2, // Only allow 2 fix attempts
+            DefaultPrologGoal = "main"
+        };
+
+        var sut = new GameGeneratorService(
+            _llmService,
+            _prologService,
+            _requestValidator,
+            Options.Create(settings),
+            _logger);
+
+        var request = new GameGenerationRequest { ExecuteGame = true };
+
+        _llmService.CurrentProvider.Returns("Ollama");
+        _llmService.SetProviderAsync(Arg.Any<LlmProviderType>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        // Game idea, initial code, fix 1, fix 2 (all produce broken code)
+        _llmService.ChatAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(
+                new CompletionResponse { Text = "Game idea", TokensGenerated = 10 },
+                new CompletionResponse { Text = "```prolog\nmain :- broken1.\n```", TokensGenerated = 10 },
+                new CompletionResponse { Text = "```prolog\nmain :- broken2.\n```", TokensGenerated = 10 },
+                new CompletionResponse { Text = "```prolog\nmain :- broken3.\n```", TokensGenerated = 10 });
+
+        _prologService.ExecuteFileAsync(Arg.Any<PrologFileRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new PrologResponse { Success = false, Error = "Persistent error", ExitCode = 1 });
+
+        // Act
+        var result = await sut.GenerateGameAsync(request);
+
+        // Assert
+        result.Success.Should().BeTrue(); // Generation succeeded, execution failed
+        result.ExecutionSuccess.Should().BeFalse();
+        result.ExecutionError.Should().Be("Persistent error");
+        result.FixAttempts.Should().Be(2); // Should have attempted 2 fixes
+    }
+
+    [Fact]
+    public async Task GenerateGameAsync_WhenLlmReturnsSameCode_StopsEarly()
+    {
+        // Arrange
+        var request = new GameGenerationRequest { ExecuteGame = true };
+
+        _llmService.CurrentProvider.Returns("Ollama");
+        _llmService.SetProviderAsync(Arg.Any<LlmProviderType>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        const string brokenCode = "main :- broken.";
+
+        // LLM returns same code when trying to fix
+        _llmService.ChatAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(
+                new CompletionResponse { Text = "Game idea", TokensGenerated = 10 },
+                new CompletionResponse { Text = $"```prolog\n{brokenCode}\n```", TokensGenerated = 10 },
+                new CompletionResponse { Text = $"```prolog\n{brokenCode}\n```", TokensGenerated = 10 }); // Same code returned
+
+        _prologService.ExecuteFileAsync(Arg.Any<PrologFileRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new PrologResponse { Success = false, Error = "Error", ExitCode = 1 });
+
+        // Act
+        var result = await _sut.GenerateGameAsync(request);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ExecutionSuccess.Should().BeFalse();
+        result.FixAttempts.Should().Be(1); // Only 1 attempt since same code was returned
+
+        // Should only have executed Prolog once (stopped after detecting same code)
+        await _prologService.Received(1)
+            .ExecuteFileAsync(Arg.Any<PrologFileRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GenerateGameAsync_WhenExecuteGameFalse_DoesNotAttemptFixes()
+    {
+        // Arrange
+        var request = new GameGenerationRequest { ExecuteGame = false };
+
+        _llmService.CurrentProvider.Returns("Ollama");
+        _llmService.SetProviderAsync(Arg.Any<LlmProviderType>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        _llmService.ChatAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(
+                new CompletionResponse { Text = "Game idea", TokensGenerated = 10 },
+                new CompletionResponse { Text = "```prolog\nmain :- broken.\n```", TokensGenerated = 10 });
+
+        // Act
+        var result = await _sut.GenerateGameAsync(request);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ExecutionSuccess.Should().BeNull();
+        result.FixAttempts.Should().Be(0);
+
+        // Should not have called Prolog service at all
+        await _prologService.DidNotReceive()
+            .ExecuteFileAsync(Arg.Any<PrologFileRequest>(), Arg.Any<CancellationToken>());
+    }
 }
 

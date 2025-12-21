@@ -67,5 +67,21 @@ public sealed class GameGenerationSettings
     /// Whether to keep generated Prolog files after execution.
     /// </summary>
     public bool KeepGeneratedFiles { get; set; } = true;
+
+    /// <summary>
+    /// Maximum number of retry attempts to fix Prolog code errors.
+    /// </summary>
+    public int MaxFixRetries { get; set; } = 3;
+
+    /// <summary>
+    /// System prompt for fixing Prolog code errors.
+    /// </summary>
+    public string PrologFixSystemPrompt { get; set; } = DefaultPrompts.PrologFixSystemPrompt;
+
+    /// <summary>
+    /// User prompt template for fixing Prolog code errors.
+    /// Supports placeholders: {PrologCode}, {Errors}
+    /// </summary>
+    public string PrologFixUserPromptTemplate { get; set; } = DefaultPrompts.PrologFixUserPromptTemplate;
 }
 

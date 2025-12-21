@@ -41,6 +41,11 @@ public sealed record GameGenerationResponse
     public string? GeneratedFilePath { get; init; }
 
     /// <summary>
+    /// Number of fix attempts made to correct Prolog errors.
+    /// </summary>
+    public int FixAttempts { get; init; }
+
+    /// <summary>
     /// Error message if generation failed.
     /// </summary>
     public string? Error { get; init; }

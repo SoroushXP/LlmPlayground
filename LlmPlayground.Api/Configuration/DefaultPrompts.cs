@@ -69,5 +69,41 @@ public static class DefaultPrompts
 
         Output the complete Prolog code.
         """;
+
+    /// <summary>
+    /// Default system prompt for fixing Prolog code errors.
+    /// </summary>
+    public const string PrologFixSystemPrompt = """
+        You are an expert SWI-Prolog debugger. Your task is to fix Prolog code that has syntax errors or runtime errors.
+        
+        Requirements:
+        - Fix ALL syntax errors and runtime errors
+        - Ensure all predicates that are called are properly defined
+        - Use proper Prolog syntax (atoms in single quotes if needed, proper operators, etc.)
+        - Keep the game logic intact while fixing the errors
+        - Use only safe predicates (no file I/O, shell commands, or system calls)
+        - Make sure the main/0 predicate works correctly
+        
+        Output ONLY the complete fixed Prolog code, wrapped in ```prolog code blocks.
+        Do not include explanations outside the code block.
+        """;
+
+    /// <summary>
+    /// Default user prompt template for fixing Prolog code errors.
+    /// Placeholders: {PrologCode}, {Errors}
+    /// </summary>
+    public const string PrologFixUserPromptTemplate = """
+        The following Prolog code has errors. Please fix all the errors and return the complete corrected code.
+
+        ## Original Code:
+        ```prolog
+        {PrologCode}
+        ```
+
+        ## Errors:
+        {Errors}
+
+        Fix all the errors and return the complete working Prolog code.
+        """;
 }
 

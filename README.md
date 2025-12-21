@@ -748,6 +748,66 @@ if (await runner.IsPrologAvailableAsync())
 
 For more details, see the [LlmPlayground.Prolog README](LlmPlayground.Prolog/README.md).
 
+## Self-Healing Code Generation
+
+The API includes a **self-healing retry loop** for Prolog code generation. When generated code fails to execute, the system automatically sends the errors back to the LLM to fix the code and retries execution.
+
+### How It Works
+
+1. **Generate** - The LLM generates Prolog code based on your game concept
+2. **Execute** - The code is executed using SWI-Prolog
+3. **Detect Errors** - If execution fails, errors are captured
+4. **Fix** - The original code and errors are sent back to the LLM with a specialized fix prompt
+5. **Retry** - The fixed code is saved and executed again
+6. **Repeat** - Steps 3-5 repeat until success or max retries are exhausted
+
+### Configuration
+
+Configure the retry behavior in `appsettings.json`:
+
+```json
+{
+  "GameGeneration": {
+    "MaxFixRetries": 3,
+    "PrologFixSystemPrompt": "You are an expert SWI-Prolog debugger...",
+    "PrologFixUserPromptTemplate": "The following Prolog code has errors..."
+  }
+}
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `MaxFixRetries` | `3` | Maximum number of fix attempts before giving up |
+| `PrologFixSystemPrompt` | *(built-in)* | System prompt for the fix request |
+| `PrologFixUserPromptTemplate` | *(built-in)* | User prompt template with `{PrologCode}` and `{Errors}` placeholders |
+
+### Response Fields
+
+The `GameGenerationResponse` includes information about fix attempts:
+
+```json
+{
+  "success": true,
+  "prologCode": "main :- write('Hello World!').",
+  "executionSuccess": true,
+  "executionOutput": "Hello World!",
+  "fixAttempts": 2,
+  "generatedFilePath": "C:\\temp\\game_20241221_143022.pl"
+}
+```
+
+- `fixAttempts` - Number of times the LLM was asked to fix the code (0 if first attempt succeeded)
+- `executionSuccess` - Whether the final execution was successful
+- `executionError` - Error message if execution still failed after all retries
+
+### Early Termination
+
+The retry loop stops early in these cases:
+- **Success** - Code executes without errors
+- **No Error** - Execution returns no error message to fix
+- **Same Code** - LLM returns identical code (prevents infinite loops)
+- **Max Retries** - Configured maximum attempts reached
+
 ## Running Tests
 
 ```bash
