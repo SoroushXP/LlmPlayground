@@ -8,6 +8,7 @@ A .NET 9 library for connecting to various LLM (Large Language Model) APIs with 
 - **Ollama Support** - Connect to locally running Ollama server
 - **LM Studio Support** - Connect to LM Studio's local server
 - **Local LLM Support** - Run GGUF models directly using LLamaSharp
+- **Prolog Support** - Execute Prolog files using SWI-Prolog
 - **Multi-Backend GPU Acceleration** - CPU, Vulkan (AMD/Intel/NVIDIA), CUDA (NVIDIA)
 - **Streaming Support** - Real-time token generation with `IAsyncEnumerable`
 - **Conversation History** - Multi-turn chat with `ChatAsync` and `ChatStreamingAsync`
@@ -20,18 +21,22 @@ A .NET 9 library for connecting to various LLM (Large Language Model) APIs with 
 ```
 LlmPlayground/
 ├── LlmPlayground.sln
-├── LlmPlayground.Core/          # Class Library
+├── LlmPlayground.Core/          # Class Library - LLM Providers
 │   ├── ILlmProvider.cs          # Base interface for all LLM providers
 │   ├── OpenAiProvider.cs        # OpenAI/ChatGPT provider
 │   ├── OllamaProvider.cs        # Ollama provider
 │   ├── LmStudioProvider.cs      # LM Studio provider
 │   └── LocalLlmProvider.cs      # Local GGUF model provider
+├── LlmPlayground.Prolog/        # Class Library - Prolog Runner
+│   ├── PrologRunner.cs          # Execute Prolog files and queries
+│   └── README.md                # Prolog-specific documentation
 ├── LlmPlayground.Console/       # Console Demo App
 │   ├── Program.cs
 │   └── appsettings.json
 └── Tests/                       # Unit Tests
     ├── LlmPlayground.Core.Tests/
-    └── LlmPlayground.Console.Tests/
+    ├── LlmPlayground.Console.Tests/
+    └── LlmPlayground.Prolog.Tests/
 ```
 
 ## Getting Started
@@ -39,6 +44,7 @@ LlmPlayground/
 ### Prerequisites
 
 - [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0)
+- [SWI-Prolog](https://www.swi-prolog.org/Download.html) (optional, for Prolog support)
 
 ### Installation
 
@@ -679,6 +685,49 @@ provider.SetModel(models[0].Id);
 await provider.InitializeAsync();
 var result = await provider.CompleteAsync("Hello!");
 ```
+
+## Prolog Support
+
+The `LlmPlayground.Prolog` library allows you to execute Prolog files and queries using SWI-Prolog.
+
+### Installing SWI-Prolog
+
+**Windows (winget)**
+```powershell
+winget install --id SWI-Prolog.SWI-Prolog -e
+```
+
+**macOS (Homebrew)**
+```bash
+brew install swi-prolog
+```
+
+**Linux (Snap)**
+```bash
+sudo snap install swi-prolog
+```
+
+### Using the Prolog Runner
+
+```csharp
+using LlmPlayground.Prolog;
+
+var runner = new PrologRunner();
+
+// Check if Prolog is available
+if (await runner.IsPrologAvailableAsync())
+{
+    // Run a Prolog file with a goal
+    var result = await runner.RunFileAsync("program.pl", "main");
+    Console.WriteLine(result.Output);
+    
+    // Or run a query directly
+    var queryResult = await runner.RunQueryAsync("X is 2 + 2, format('Result: ~w', [X])");
+    Console.WriteLine(queryResult.Output); // "Result: 4"
+}
+```
+
+For more details, see the [LlmPlayground.Prolog README](LlmPlayground.Prolog/README.md).
 
 ## Running Tests
 
