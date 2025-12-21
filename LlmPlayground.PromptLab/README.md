@@ -247,11 +247,13 @@ public class ChatService
 | LM Studio | `LmStudioProvider` | Local LLM server |
 | Ollama | `OllamaProvider` | Local LLM with Ollama |
 | OpenAI | `OpenAiProvider` | OpenAI API (GPT-4, etc.) |
+| Local LLM | `LocalLlmProvider` | Local GGUF model inference via LLamaSharp |
 
 ## Dependencies
 
 - `LlmPlayground.Core` - Core LLM provider interfaces
 - `Microsoft.Extensions.Configuration.Abstractions` - Configuration support
+- `Microsoft.Extensions.Configuration.Binder` - Configuration binding
 
 ## License
 

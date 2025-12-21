@@ -1,3 +1,5 @@
+using LlmPlayground.Console.Models;
+using LlmPlayground.Console.Services;
 using LlmPlayground.Services.Interfaces;
 using LlmPlayground.Services.Models;
 using Microsoft.Extensions.Configuration;
@@ -10,16 +12,22 @@ namespace LlmPlayground.Console;
 public class InteractiveSession
 {
     private readonly ILlmService _llmService;
+    private readonly IGameGeneratorService _gameGeneratorService;
     private readonly IConfiguration _config;
     private readonly UserPreferences _preferences;
     private readonly List<ChatMessageDto> _conversationHistory = [];
-    
+
     private bool _streamingMode;
     private InferenceOptionsDto _options = null!;
 
-    public InteractiveSession(ILlmService llmService, IConfiguration config, UserPreferences preferences)
+    public InteractiveSession(
+        ILlmService llmService,
+        IGameGeneratorService gameGeneratorService,
+        IConfiguration config,
+        UserPreferences preferences)
     {
         _llmService = llmService;
+        _gameGeneratorService = gameGeneratorService;
         _config = config;
         _preferences = preferences;
     }
@@ -41,7 +49,7 @@ public class InteractiveSession
     {
         InitializeSettings();
         ShowLoadedPreferences();
-        ConsoleStyles.Muted("Commands: 'help', 'exit', 'stream', 'settings', 'reset', 'clear', 'history'");
+        ConsoleStyles.Muted("Commands: 'help', 'exit', 'stream', 'settings', 'reset', 'clear', 'history', 'game'");
         ConsoleStyles.Blank();
 
         while (true)
@@ -77,34 +85,37 @@ public class InteractiveSession
         }
     }
 
-    private Task<bool> HandleCommandAsync(string input)
+    private async Task<bool> HandleCommandAsync(string input)
     {
         switch (input.ToLowerInvariant())
         {
             case "help":
                 ShowHelp();
-                return Task.FromResult(true);
+                return true;
             case "stream":
                 ToggleStreamingMode();
-                return Task.FromResult(true);
+                return true;
             case "clear":
                 _conversationHistory.Clear();
                 ConsoleStyles.Success("Conversation history cleared.");
                 ConsoleStyles.Blank();
-                return Task.FromResult(true);
+                return true;
             case "history":
                 ShowHistory();
-                return Task.FromResult(true);
+                return true;
             case "settings":
                 _options = ConfigureSettings();
-                return Task.FromResult(true);
+                return true;
             case "reset":
                 ResetPreferences();
                 ConsoleStyles.Warning("Preferences reset. Restart the app to apply.");
                 ConsoleStyles.Blank();
-                return Task.FromResult(true);
+                return true;
+            case "game":
+                await ExecuteGameGenerationWithCancellationAsync();
+                return true;
             default:
-                return Task.FromResult(false);
+                return false;
         }
     }
 
@@ -127,6 +138,137 @@ public class InteractiveSession
         {
             System.Console.CancelKeyPress -= CancelHandler;
         }
+    }
+
+    private async Task ExecuteGameGenerationWithCancellationAsync()
+    {
+        using var requestCts = new CancellationTokenSource();
+
+        void CancelHandler(object? sender, ConsoleCancelEventArgs e)
+        {
+            e.Cancel = true;
+            requestCts.Cancel();
+        }
+
+        System.Console.CancelKeyPress += CancelHandler;
+        try
+        {
+            await ProcessGameGenerationAsync(requestCts.Token);
+        }
+        finally
+        {
+            System.Console.CancelKeyPress -= CancelHandler;
+        }
+    }
+
+    private async Task ProcessGameGenerationAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            ConsoleStyles.Header("Game Generation", ConsoleStyles.Emoji.Sparkles);
+
+            // Prompt for theme
+            ConsoleStyles.Muted("Enter a theme (or press Enter for random):");
+            ConsoleStyles.Prompt();
+            var theme = System.Console.ReadLine()?.Trim();
+            if (string.IsNullOrWhiteSpace(theme)) theme = null;
+
+            // Prompt for description
+            ConsoleStyles.Muted("Enter additional requirements (or press Enter to skip):");
+            ConsoleStyles.Prompt();
+            var description = System.Console.ReadLine()?.Trim();
+            if (string.IsNullOrWhiteSpace(description)) description = null;
+
+            // Prompt for execution preference
+            ConsoleStyles.Muted("Execute the generated game? (Y/n):");
+            ConsoleStyles.Prompt();
+            var executeInput = System.Console.ReadLine()?.Trim();
+            var executeGame = string.IsNullOrEmpty(executeInput) ||
+                              executeInput.Equals("y", StringComparison.OrdinalIgnoreCase) ||
+                              executeInput.Equals("yes", StringComparison.OrdinalIgnoreCase);
+
+            ConsoleStyles.Blank();
+            ConsoleStyles.Info("Starting game generation...");
+            ConsoleStyles.Blank();
+
+            var request = new GameGenerationRequest
+            {
+                Theme = theme,
+                Description = description,
+                ExecuteGame = executeGame
+            };
+
+            var result = await _gameGeneratorService.GenerateGameAsync(request, cancellationToken);
+
+            DisplayGameGenerationResult(result);
+        }
+        catch (OperationCanceledException)
+        {
+            HandleCancellation();
+        }
+        catch (Exception ex)
+        {
+            HandleError(ex);
+        }
+    }
+
+    private void DisplayGameGenerationResult(GameGenerationResponse result)
+    {
+        if (!result.Success)
+        {
+            ConsoleStyles.Error($"Game generation failed: {result.Error}");
+            ConsoleStyles.Blank();
+            return;
+        }
+
+        ConsoleStyles.Header("Game Idea", ConsoleStyles.Emoji.Star);
+        ConsoleStyles.Response(result.GameIdea ?? "(No game idea generated)");
+        ConsoleStyles.Blank();
+
+        ConsoleStyles.Header("Prolog Code", ConsoleStyles.Emoji.Gear);
+        ConsoleStyles.Muted(result.PrologCode ?? "(No code generated)");
+        ConsoleStyles.Blank();
+
+        if (result.GeneratedFilePath != null)
+        {
+            ConsoleStyles.KeyValue("Generated File", result.GeneratedFilePath);
+        }
+
+        if (result.ExecutionSuccess.HasValue)
+        {
+            ConsoleStyles.Header("Execution Result", ConsoleStyles.Emoji.Rocket);
+            if (result.ExecutionSuccess.Value)
+            {
+                ConsoleStyles.Success("Execution successful!");
+                ConsoleStyles.Response(result.ExecutionOutput ?? "(No output)");
+            }
+            else
+            {
+                ConsoleStyles.Warning("Execution failed.");
+                ConsoleStyles.Error(result.ExecutionError ?? "(Unknown error)");
+            }
+            ConsoleStyles.Blank();
+        }
+
+        if (result.FixAttempts > 0)
+        {
+            ConsoleStyles.KeyValue("Fix Attempts", result.FixAttempts.ToString());
+        }
+
+        ConsoleStyles.KeyValue("Provider", result.ProviderUsed ?? "Unknown");
+        ConsoleStyles.KeyValue("Duration", $"{result.Duration.TotalSeconds:F2}s");
+
+        if (result.Timings != null)
+        {
+            ConsoleStyles.Muted($"  - Game Idea: {result.Timings.GameIdeaGeneration.TotalSeconds:F2}s");
+            ConsoleStyles.Muted($"  - Prolog Code: {result.Timings.PrologCodeGeneration.TotalSeconds:F2}s");
+            if (result.Timings.PrologExecution.HasValue)
+            {
+                ConsoleStyles.Muted($"  - Execution: {result.Timings.PrologExecution.Value.TotalSeconds:F2}s");
+            }
+        }
+
+        ConsoleStyles.Blank();
     }
 
     private async Task ProcessPromptAsync(string input, CancellationToken cancellationToken)
@@ -217,6 +359,7 @@ public class InteractiveSession
         ConsoleStyles.Muted("  reset     - Reset all saved preferences");
         ConsoleStyles.Muted("  clear     - Clear conversation history");
         ConsoleStyles.Muted("  history   - Show conversation history");
+        ConsoleStyles.Muted("  game      - Generate a Prolog-based logic game");
         ConsoleStyles.Blank();
     }
 

@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace LlmPlayground.Api.Helpers;
+namespace LlmPlayground.Console.Helpers;
 
 /// <summary>
 /// Helper for extracting Prolog code from LLM responses.
@@ -32,7 +32,6 @@ public static partial class PrologCodeExtractor
         }
 
         // If no code blocks found, try to identify Prolog code patterns
-        // Look for common Prolog constructs like facts and rules
         if (ContainsPrologCode(response))
         {
             return ExtractPrologStatements(response);
@@ -52,10 +51,6 @@ public static partial class PrologCodeExtractor
         if (string.IsNullOrWhiteSpace(code))
             return false;
 
-        // Check for common Prolog patterns
-        // - Facts: name(arg1, arg2).
-        // - Rules: head :- body.
-        // - Comments: % comment or /* comment */
         return PrologFactPattern().IsMatch(code) || 
                PrologRulePattern().IsMatch(code) ||
                PrologCommentPattern().IsMatch(code);
@@ -71,7 +66,6 @@ public static partial class PrologCodeExtractor
         if (string.IsNullOrWhiteSpace(code))
             return string.Empty;
 
-        // Comment out lines containing unsafe predicates
         var lines = code.Split('\n');
         var sanitizedLines = lines.Select(line =>
         {
@@ -92,7 +86,6 @@ public static partial class PrologCodeExtractor
 
     private static string ExtractPrologStatements(string text)
     {
-        // Extract lines that look like Prolog statements
         var lines = text.Split('\n');
         var prologLines = new List<string>();
 
@@ -100,21 +93,18 @@ public static partial class PrologCodeExtractor
         {
             var trimmed = line.Trim();
             
-            // Skip empty lines and obvious prose
             if (string.IsNullOrWhiteSpace(trimmed))
             {
                 prologLines.Add(string.Empty);
                 continue;
             }
 
-            // Include Prolog comments
             if (trimmed.StartsWith('%') || trimmed.StartsWith("/*"))
             {
                 prologLines.Add(trimmed);
                 continue;
             }
 
-            // Include lines that look like Prolog statements
             if (PrologFactPattern().IsMatch(trimmed) || 
                 PrologRulePattern().IsMatch(trimmed) ||
                 trimmed.EndsWith('.'))
@@ -126,7 +116,6 @@ public static partial class PrologCodeExtractor
         return string.Join('\n', prologLines).Trim();
     }
 
-    // Regex patterns
     [GeneratedRegex(@"```(?:prolog|pl)\s*\n([\s\S]*?)\n?```", RegexOptions.IgnoreCase)]
     private static partial Regex PrologCodeBlockPattern();
 

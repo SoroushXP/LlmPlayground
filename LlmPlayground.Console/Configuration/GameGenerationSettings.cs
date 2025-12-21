@@ -1,4 +1,4 @@
-namespace LlmPlayground.Api.Configuration;
+namespace LlmPlayground.Console.Configuration;
 
 /// <summary>
 /// Settings for game generation, loaded from configuration file.
@@ -6,11 +6,6 @@ namespace LlmPlayground.Api.Configuration;
 /// </summary>
 public sealed class GameGenerationSettings
 {
-    /// <summary>
-    /// Default LLM provider to use (e.g., "Ollama", "LmStudio", "OpenAI").
-    /// </summary>
-    public string DefaultProviderString { get; set; } = "Ollama";
-
     /// <summary>
     /// System prompt for generating game ideas.
     /// </summary>

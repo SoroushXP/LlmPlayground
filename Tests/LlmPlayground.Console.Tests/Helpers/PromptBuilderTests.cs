@@ -1,9 +1,8 @@
 using FluentAssertions;
-using LlmPlayground.Api.Helpers;
-using LlmPlayground.Api.Models;
+using LlmPlayground.Console.Helpers;
 using Xunit;
 
-namespace LlmPlayground.Api.Tests.Helpers;
+namespace LlmPlayground.Console.Tests.Helpers;
 
 public class PromptBuilderTests
 {
@@ -12,14 +11,9 @@ public class PromptBuilderTests
     {
         // Arrange
         var template = "Create a game. {ThemeSection} {DescriptionSection}";
-        var request = new GameGenerationRequest
-        {
-            Theme = "mystery",
-            Description = "Include puzzles"
-        };
 
         // Act
-        var result = PromptBuilder.BuildGameIdeaPrompt(template, request);
+        var result = PromptBuilder.BuildGameIdeaPrompt(template, "mystery", "Include puzzles");
 
         // Assert
         result.Should().Contain("mystery");
@@ -33,14 +27,9 @@ public class PromptBuilderTests
     {
         // Arrange
         var template = "Create a game. {ThemeSection} {DescriptionSection}";
-        var request = new GameGenerationRequest
-        {
-            Theme = null,
-            Description = "Test description"
-        };
 
         // Act
-        var result = PromptBuilder.BuildGameIdeaPrompt(template, request);
+        var result = PromptBuilder.BuildGameIdeaPrompt(template, null, "Test description");
 
         // Assert
         result.Should().NotContain("{ThemeSection}");
@@ -52,14 +41,9 @@ public class PromptBuilderTests
     {
         // Arrange
         var template = "Create a game. {ThemeSection} {DescriptionSection}";
-        var request = new GameGenerationRequest
-        {
-            Theme = "adventure",
-            Description = null
-        };
 
         // Act
-        var result = PromptBuilder.BuildGameIdeaPrompt(template, request);
+        var result = PromptBuilder.BuildGameIdeaPrompt(template, "adventure", null);
 
         // Assert
         result.Should().Contain("adventure");
@@ -71,10 +55,9 @@ public class PromptBuilderTests
     {
         // Arrange
         var template = "Create a game. {ThemeSection} {DescriptionSection}";
-        var request = new GameGenerationRequest();
 
         // Act
-        var result = PromptBuilder.BuildGameIdeaPrompt(template, request);
+        var result = PromptBuilder.BuildGameIdeaPrompt(template, null, null);
 
         // Assert
         result.Should().NotContain("{ThemeSection}");
@@ -86,10 +69,9 @@ public class PromptBuilderTests
     {
         // Arrange
         var template = "  Create game {ThemeSection}  ";
-        var request = new GameGenerationRequest { Theme = "test" };
 
         // Act
-        var result = PromptBuilder.BuildGameIdeaPrompt(template, request);
+        var result = PromptBuilder.BuildGameIdeaPrompt(template, "test", null);
 
         // Assert
         result.Should().NotStartWith(" ");
@@ -126,58 +108,35 @@ public class PromptBuilderTests
     }
 
     [Fact]
-    public void ValidateTemplate_WithAllPlaceholders_ReturnsEmpty()
+    public void BuildPrologFixPrompt_ReplacesAllPlaceholders()
     {
         // Arrange
-        var template = "Hello {Name}, welcome to {Place}!";
+        var template = "Fix this code: {PrologCode} Errors: {Errors}";
+        var prologCode = "main :- undefined.";
+        var errors = "Undefined predicate";
 
         // Act
-        var missing = PromptBuilder.ValidateTemplate(template, "Name", "Place");
+        var result = PromptBuilder.BuildPrologFixPrompt(template, prologCode, errors);
 
         // Assert
-        missing.Should().BeEmpty();
+        result.Should().Contain("main :- undefined.");
+        result.Should().Contain("Undefined predicate");
+        result.Should().NotContain("{PrologCode}");
+        result.Should().NotContain("{Errors}");
     }
 
     [Fact]
-    public void ValidateTemplate_WithMissingPlaceholder_ReturnsMissing()
+    public void BuildPrologFixPrompt_TrimsResult()
     {
         // Arrange
-        var template = "Hello {Name}!";
+        var template = "  {PrologCode} {Errors}  ";
 
         // Act
-        var missing = PromptBuilder.ValidateTemplate(template, "Name", "Place");
+        var result = PromptBuilder.BuildPrologFixPrompt(template, "code", "error");
 
         // Assert
-        missing.Should().ContainSingle("Place");
-    }
-
-    [Fact]
-    public void ValidateTemplate_WithAllMissing_ReturnsAll()
-    {
-        // Arrange
-        var template = "Plain text";
-
-        // Act
-        var missing = PromptBuilder.ValidateTemplate(template, "A", "B", "C");
-
-        // Assert
-        missing.Should().HaveCount(3);
-        missing.Should().Contain("A");
-        missing.Should().Contain("B");
-        missing.Should().Contain("C");
-    }
-
-    [Fact]
-    public void ValidateTemplate_IsCaseInsensitive()
-    {
-        // Arrange
-        var template = "Hello {NAME}!";
-
-        // Act
-        var missing = PromptBuilder.ValidateTemplate(template, "name");
-
-        // Assert
-        missing.Should().BeEmpty();
+        result.Should().NotStartWith(" ");
+        result.Should().NotEndWith(" ");
     }
 }
 

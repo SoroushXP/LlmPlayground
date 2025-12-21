@@ -36,9 +36,10 @@ LlmPlayground/
 │   ├── Interfaces/                   # Service interfaces
 │   ├── Services/                     # Service implementations
 │   └── Models/                       # DTOs for requests/responses
-├── LlmPlayground.Utilities/          # Validation & Sanitization
+├── LlmPlayground.Utilities/          # Validation, Sanitization & Logging
 │   ├── Validation/                   # Request validation
-│   └── Sanitization/                 # Input sanitization
+│   ├── Sanitization/                 # Input sanitization
+│   └── Logging/                      # Centralized logging system
 ├── LlmPlayground.PromptLab/          # Prompt Engineering Library
 │   ├── PromptSession.cs              # Conversation session management
 │   ├── PromptTemplate.cs             # Template and builder utilities
@@ -48,6 +49,11 @@ LlmPlayground/
 │   └── README.md                     # Prolog-specific documentation
 ├── LlmPlayground.Console/            # Console Demo App
 │   ├── Program.cs
+│   ├── InteractiveSession.cs         # Interactive command handling
+│   ├── Configuration/                # Game generation settings
+│   ├── Services/                     # Game generation service
+│   ├── Helpers/                      # Prompt building and code extraction
+│   ├── Models/                       # Request/response models
 │   └── appsettings.json
 └── Tests/                            # Unit Tests
     ├── LlmPlayground.Core.Tests/
@@ -483,6 +489,18 @@ These options can be passed to `CompleteAsync()` and `CompleteStreamingAsync()`:
     "Temperature": 0.7,
     "TopP": 0.9,
     "RepeatPenalty": 1.1
+  },
+  "GameGeneration": {
+    "DefaultGameIdeaMaxTokens": 1024,
+    "DefaultGameIdeaTemperature": 0.8,
+    "DefaultPrologCodeMaxTokens": 2048,
+    "DefaultPrologCodeTemperature": 0.5,
+    "DefaultPrologGoal": "main",
+    "MaxFixRetries": 3,
+    "OutputDirectory": ""
+  },
+  "Prolog": {
+    "SwiPrologPath": "swipl"
   }
 }
 ```
@@ -516,6 +534,7 @@ dotnet run -- --silent
 | `reset` | Reset all saved preferences |
 | `clear` | Clear conversation history |
 | `history` | Show conversation history |
+| `game` | Generate a Prolog-based logic game using LLM (with self-healing code) |
 
 ### Conversation History
 
@@ -750,7 +769,7 @@ For more details, see the [LlmPlayground.Prolog README](LlmPlayground.Prolog/REA
 
 ## Self-Healing Code Generation
 
-The API includes a **self-healing retry loop** for Prolog code generation. When generated code fails to execute, the system automatically sends the errors back to the LLM to fix the code and retries execution.
+The **Console app** includes a **self-healing retry loop** for Prolog code generation. When generated code fails to execute, the system automatically sends the errors back to the LLM to fix the code and retries execution.
 
 ### How It Works
 
@@ -760,6 +779,24 @@ The API includes a **self-healing retry loop** for Prolog code generation. When 
 4. **Fix** - The original code and errors are sent back to the LLM with a specialized fix prompt
 5. **Retry** - The fixed code is saved and executed again
 6. **Repeat** - Steps 3-5 repeat until success or max retries are exhausted
+
+### Using in Console App
+
+Use the `game` command in the interactive console to generate and execute Prolog games:
+
+```
+> game
+Enter game theme (or press Enter for random): mystery
+Enter additional requirements (or press Enter to skip): Include a detective character
+Execute the generated game? (y/n): y
+
+★ Generating game idea...
+★ Generating Prolog code...
+★ Executing Prolog code...
+✓ Game executed successfully!
+```
+
+The console app automatically retries failed code with LLM-generated fixes.
 
 ### Configuration
 

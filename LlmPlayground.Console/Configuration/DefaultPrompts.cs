@@ -1,4 +1,4 @@
-namespace LlmPlayground.Api.Configuration;
+namespace LlmPlayground.Console.Configuration;
 
 /// <summary>
 /// Default prompt templates used when configuration is not provided.

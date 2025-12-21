@@ -1,8 +1,8 @@
 using FluentAssertions;
-using LlmPlayground.Api.Helpers;
+using LlmPlayground.Console.Helpers;
 using Xunit;
 
-namespace LlmPlayground.Api.Tests.Helpers;
+namespace LlmPlayground.Console.Tests.Helpers;
 
 public class PrologCodeExtractorTests
 {
@@ -171,7 +171,7 @@ public class PrologCodeExtractorTests
     {
         // Arrange
         var code = """
-            main :- 
+            main :-
                 write('Hello'),
                 shell('ls'),
                 nl.

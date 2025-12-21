@@ -1,14 +1,13 @@
 using System.Diagnostics;
-using LlmPlayground.Api.Configuration;
-using LlmPlayground.Api.Helpers;
-using LlmPlayground.Api.Models;
-using LlmPlayground.Core;
+using LlmPlayground.Console.Configuration;
+using LlmPlayground.Console.Helpers;
+using LlmPlayground.Console.Models;
 using LlmPlayground.Services.Interfaces;
 using LlmPlayground.Services.Models;
 using LlmPlayground.Utilities.Validation;
 using Microsoft.Extensions.Options;
 
-namespace LlmPlayground.Api.Services;
+namespace LlmPlayground.Console.Services;
 
 /// <summary>
 /// Service implementation for generating Prolog-based logic games using LLM providers.
@@ -19,20 +18,17 @@ public sealed class GameGeneratorService : IGameGeneratorService
     private readonly IPrologService _prologService;
     private readonly IRequestValidator _requestValidator;
     private readonly GameGenerationSettings _settings;
-    private readonly ILogger<GameGeneratorService> _logger;
 
     public GameGeneratorService(
         ILlmService llmService,
         IPrologService prologService,
         IRequestValidator requestValidator,
-        IOptions<GameGenerationSettings> settings,
-        ILogger<GameGeneratorService> logger)
+        IOptions<GameGenerationSettings> settings)
     {
         _llmService = llmService ?? throw new ArgumentNullException(nameof(llmService));
         _prologService = prologService ?? throw new ArgumentNullException(nameof(prologService));
         _requestValidator = requestValidator ?? throw new ArgumentNullException(nameof(requestValidator));
         _settings = settings?.Value ?? throw new ArgumentNullException(nameof(settings));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <inheritdoc />
@@ -47,55 +43,42 @@ public sealed class GameGeneratorService : IGameGeneratorService
 
         try
         {
-            // Step 1: Set up the LLM provider
-            var providerType = DetermineProvider(request.Provider);
-            await _llmService.SetProviderAsync(providerType, cancellationToken);
             var providerUsed = _llmService.CurrentProvider;
 
-            _logger.LogInformation(
-                "Starting game generation with provider {Provider}",
-                providerUsed);
-
-            // Step 2: Generate game idea
-            _logger.LogDebug("Generating game idea...");
+            // Step 1: Generate game idea
+            ConsoleStyles.Muted("Generating game idea...");
             timings.StartPhase("GameIdea");
             
             var gameIdea = await GenerateGameIdeaAsync(request, cancellationToken);
             
             timings.EndPhase("GameIdea");
-            _logger.LogDebug("Game idea generated successfully");
 
-            // Step 3: Generate Prolog code from the idea
-            _logger.LogDebug("Generating Prolog code...");
+            // Step 2: Generate Prolog code from the idea
+            ConsoleStyles.Muted("Generating Prolog code...");
             timings.StartPhase("PrologCode");
             
             var prologCode = await GeneratePrologCodeAsync(gameIdea, cancellationToken);
             
             timings.EndPhase("PrologCode");
-            _logger.LogDebug("Prolog code generated successfully");
 
             // Validate and sanitize the Prolog code
             var validationResult = _requestValidator.ValidatePrologQuery(prologCode);
             if (!validationResult.IsValid)
             {
-                _logger.LogWarning(
-                    "Generated Prolog code contains potentially unsafe constructs: {Errors}",
-                    validationResult.GetErrorSummary());
-
-                // Sanitize the code by commenting out unsafe predicates
+                ConsoleStyles.Warning("Generated code contains potentially unsafe constructs, sanitizing...");
                 prologCode = PrologCodeExtractor.SanitizePrologCode(prologCode);
             }
 
-            // Step 4: Save the Prolog code to file
+            // Step 3: Save the Prolog code to file
             string? executionOutput = null;
             bool? executionSuccess = null;
             string? executionError = null;
             int fixAttempts = 0;
             
             var generatedFilePath = await SavePrologCodeAsync(prologCode, cancellationToken);
-            _logger.LogInformation("Generated Prolog file: {Path}", generatedFilePath);
+            ConsoleStyles.Muted($"Generated Prolog file: {generatedFilePath}");
 
-            // Step 5: Execute the Prolog code (if requested) with retry loop for fixing errors
+            // Step 4: Execute the Prolog code (if requested) with retry loop for fixing errors
             if (request.ExecuteGame)
             {
                 timings.StartPhase("Execution");
@@ -104,7 +87,7 @@ public sealed class GameGeneratorService : IGameGeneratorService
 
                 for (int attempt = 0; attempt <= _settings.MaxFixRetries; attempt++)
                 {
-                    _logger.LogDebug("Executing Prolog code (attempt {Attempt})...", attempt + 1);
+                    ConsoleStyles.Muted($"Executing Prolog code (attempt {attempt + 1})...");
 
                     var executionResult = await ExecutePrologCodeAsync(generatedFilePath, goal, cancellationToken);
 
@@ -112,42 +95,33 @@ public sealed class GameGeneratorService : IGameGeneratorService
                     executionSuccess = executionResult.Success;
                     executionError = executionResult.Error;
 
-                    // If successful or no error to fix, we're done
                     if (executionResult.Success || string.IsNullOrWhiteSpace(executionResult.Error))
                     {
-                        _logger.LogDebug("Prolog execution succeeded on attempt {Attempt}", attempt + 1);
                         break;
                     }
 
-                    // If we've exhausted retries, stop
                     if (attempt >= _settings.MaxFixRetries)
                     {
-                        _logger.LogWarning(
-                            "Prolog execution failed after {Attempts} fix attempts. Last error: {Error}",
-                            fixAttempts, executionResult.Error);
+                        ConsoleStyles.Warning($"Prolog execution failed after {fixAttempts} fix attempts.");
                         break;
                     }
 
-                    // Try to fix the code using LLM
-                    _logger.LogInformation(
-                        "Prolog execution failed, attempting to fix (attempt {Attempt}/{Max}). Error: {Error}",
-                        attempt + 1, _settings.MaxFixRetries, executionResult.Error);
+                    ConsoleStyles.Warning($"Execution failed, attempting to fix (attempt {attempt + 1}/{_settings.MaxFixRetries})...");
 
                     fixAttempts++;
                     var fixedCode = await FixPrologCodeAsync(currentCode, executionResult.Error, cancellationToken);
 
                     if (fixedCode == currentCode)
                     {
-                        _logger.LogWarning("LLM returned the same code, stopping fix attempts");
+                        ConsoleStyles.Warning("LLM returned the same code, stopping fix attempts.");
                         break;
                     }
 
                     currentCode = fixedCode;
                     prologCode = fixedCode;
 
-                    // Save the fixed code to file
                     generatedFilePath = await SavePrologCodeAsync(fixedCode, cancellationToken);
-                    _logger.LogInformation("Saved fixed Prolog file: {Path}", generatedFilePath);
+                    ConsoleStyles.Muted($"Saved fixed Prolog file: {generatedFilePath}");
                 }
 
                 timings.EndPhase("Execution");
@@ -178,8 +152,6 @@ public sealed class GameGeneratorService : IGameGeneratorService
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             totalStopwatch.Stop();
-            _logger.LogError(ex, "Game generation failed");
-
             return new GameGenerationResponse
             {
                 Success = false,
@@ -195,7 +167,8 @@ public sealed class GameGeneratorService : IGameGeneratorService
     {
         var userPrompt = PromptBuilder.BuildGameIdeaPrompt(
             _settings.GameIdeaUserPromptTemplate,
-            request);
+            request.Theme,
+            request.Description);
 
         var chatRequest = new ChatRequest
         {
@@ -238,8 +211,6 @@ public sealed class GameGeneratorService : IGameGeneratorService
         };
 
         var response = await _llmService.ChatAsync(chatRequest, cancellationToken);
-
-        // Extract the Prolog code from the response (may be in markdown code blocks)
         return PrologCodeExtractor.ExtractPrologCode(response.Text);
     }
 
@@ -248,9 +219,10 @@ public sealed class GameGeneratorService : IGameGeneratorService
         string errors,
         CancellationToken cancellationToken)
     {
-        var userPrompt = _settings.PrologFixUserPromptTemplate
-            .Replace("{PrologCode}", prologCode)
-            .Replace("{Errors}", errors);
+        var userPrompt = PromptBuilder.BuildPrologFixPrompt(
+            _settings.PrologFixUserPromptTemplate,
+            prologCode,
+            errors);
 
         var chatRequest = new ChatRequest
         {
@@ -262,13 +234,11 @@ public sealed class GameGeneratorService : IGameGeneratorService
             Options = new InferenceOptionsDto
             {
                 MaxTokens = _settings.DefaultPrologCodeMaxTokens,
-                Temperature = 0.3f // Lower temperature for more deterministic fixes
+                Temperature = 0.3f
             }
         };
 
         var response = await _llmService.ChatAsync(chatRequest, cancellationToken);
-
-        // Extract the Prolog code from the response
         return PrologCodeExtractor.ExtractPrologCode(response.Text);
     }
 
@@ -278,7 +248,6 @@ public sealed class GameGeneratorService : IGameGeneratorService
     {
         var prologFile = GetPrologFilePath();
 
-        // Ensure directory exists
         var directory = Path.GetDirectoryName(prologFile);
         if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
         {
@@ -318,8 +287,7 @@ public sealed class GameGeneratorService : IGameGeneratorService
         if (!string.IsNullOrWhiteSpace(_settings.PrologOutputDirectory))
         {
             var outputDir = _settings.PrologOutputDirectory;
-            
-            // If relative path, make it relative to the current directory
+
             if (!Path.IsPathRooted(outputDir))
             {
                 outputDir = Path.Combine(AppContext.BaseDirectory, outputDir);
@@ -328,29 +296,9 @@ public sealed class GameGeneratorService : IGameGeneratorService
             return Path.Combine(outputDir, fileName);
         }
 
-        // Fall back to temp directory
         return Path.Combine(Path.GetTempPath(), fileName);
     }
 
-    private LlmProviderType DetermineProvider(string? requestedProvider)
-    {
-        var providerString = requestedProvider ?? _settings.DefaultProviderString;
-
-        if (Enum.TryParse<LlmProviderType>(providerString, ignoreCase: true, out var providerType))
-        {
-            return providerType;
-        }
-
-        _logger.LogWarning(
-            "Unknown provider '{Provider}', falling back to Ollama",
-            providerString);
-
-        return LlmProviderType.Ollama;
-    }
-
-    /// <summary>
-    /// Helper record for Prolog execution results.
-    /// </summary>
     private sealed record PrologExecutionResult
     {
         public bool Success { get; init; }
@@ -358,9 +306,6 @@ public sealed class GameGeneratorService : IGameGeneratorService
         public string? Error { get; init; }
     }
 
-    /// <summary>
-    /// Helper class for collecting timing information.
-    /// </summary>
     private sealed class TimingCollector
     {
         private readonly Dictionary<string, Stopwatch> _stopwatches = new();
@@ -380,8 +325,8 @@ public sealed class GameGeneratorService : IGameGeneratorService
 
         public TimeSpan GetDuration(string name)
         {
-            return _stopwatches.TryGetValue(name, out var sw) 
-                ? sw.Elapsed 
+            return _stopwatches.TryGetValue(name, out var sw)
+                ? sw.Elapsed
                 : TimeSpan.Zero;
         }
     }

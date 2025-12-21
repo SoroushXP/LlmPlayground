@@ -1,4 +1,31 @@
-namespace LlmPlayground.Api.Models;
+namespace LlmPlayground.Console.Models;
+
+/// <summary>
+/// Request model for generating a Prolog-based logic game.
+/// </summary>
+public sealed record GameGenerationRequest
+{
+    /// <summary>
+    /// Optional theme for the game (e.g., "mystery", "adventure", "puzzle").
+    /// If not provided, the LLM will choose a theme.
+    /// </summary>
+    public string? Theme { get; init; }
+
+    /// <summary>
+    /// Optional description or additional requirements for the game.
+    /// </summary>
+    public string? Description { get; init; }
+
+    /// <summary>
+    /// Whether to execute the generated Prolog code and include the output.
+    /// </summary>
+    public bool ExecuteGame { get; init; } = true;
+
+    /// <summary>
+    /// Custom Prolog goal to execute. If not specified, uses "main" from configuration.
+    /// </summary>
+    public string? PrologGoal { get; init; }
+}
 
 /// <summary>
 /// Response model for a generated Prolog-based logic game.
@@ -36,7 +63,7 @@ public sealed record GameGenerationResponse
     public string? ExecutionError { get; init; }
 
     /// <summary>
-    /// Path to the generated Prolog file (if KeepGeneratedFiles is true).
+    /// Path to the generated Prolog file.
     /// </summary>
     public string? GeneratedFilePath { get; init; }
 

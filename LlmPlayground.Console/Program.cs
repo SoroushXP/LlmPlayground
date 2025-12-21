@@ -1,4 +1,6 @@
 ﻿using LlmPlayground.Console;
+using LlmPlayground.Console.Configuration;
+using LlmPlayground.Console.Services;
 using LlmPlayground.Core;
 using LlmPlayground.Services.Extensions;
 using LlmPlayground.Services.Interfaces;
@@ -41,6 +43,10 @@ services.AddLlmPlaygroundServices();
 
 // Add validation services
 services.AddSingleton<IRequestValidator, RequestValidator>();
+
+// Add GameGeneration configuration and service
+services.Configure<GameGenerationSettings>(config.GetSection("GameGeneration"));
+services.AddSingleton<IGameGeneratorService, GameGeneratorService>();
 
 // Add console-specific services
 services.AddSingleton<UserPreferences>(_ => UserPreferences.Load());
