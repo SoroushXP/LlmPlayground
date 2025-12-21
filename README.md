@@ -769,31 +769,47 @@ For more details, see the [LlmPlayground.Prolog README](LlmPlayground.Prolog/REA
 
 ## Self-Healing Code Generation
 
-The **Console app** includes a **self-healing retry loop** for Prolog code generation. When generated code fails to execute, the system automatically sends the errors back to the LLM to fix the code and retries execution.
+The **Console app** includes a **self-healing retry loop** for Prolog puzzle game generation. When generated code fails to execute or produces insufficient output, the system automatically sends the errors back to the LLM to fix the code and retries execution.
 
 ### How It Works
 
-1. **Generate** - The LLM generates Prolog code based on your game concept
+1. **Generate** - The LLM generates a solvable logic puzzle with Prolog code
 2. **Execute** - The code is executed using SWI-Prolog
-3. **Detect Errors** - If execution fails, errors are captured
-4. **Fix** - The original code and errors are sent back to the LLM with a specialized fix prompt
+3. **Validate** - Check for errors AND validate output quality (minimum lines, query results)
+4. **Fix** - If validation fails, errors are sent back to the LLM with a specialized fix prompt
 5. **Retry** - The fixed code is saved and executed again
-6. **Repeat** - Steps 3-5 repeat until success or max retries are exhausted
+6. **Play** - After validation succeeds, launch interactive Prolog session to play the game
+
+### Generated Puzzle Structure
+
+Each generated puzzle includes:
+- **solve(X)** - Predicate that deduces the hidden answer from clues
+- **check_answer(Guess)** - Verify a guess without revealing the answer
+- **show_clues** - Display all puzzle clues
+- **hint(N)** - Get progressive hints (hint(1), hint(2), etc.)
 
 ### Using in Console App
 
-Use the `game` command in the interactive console to generate and execute Prolog games:
+Use the `game` command in the interactive console:
 
 ```
 > game
-Enter game theme (or press Enter for random): mystery
-Enter additional requirements (or press Enter to skip): Include a detective character
+Enter game theme (or press Enter for random): detective mystery
+Enter additional requirements (or press Enter to skip): 4 suspects, one is the thief
 Execute the generated game? (y/n): y
 
 ★ Generating game idea...
 ★ Generating Prolog code...
 ★ Executing Prolog code...
 ✓ Game executed successfully!
+
+Would you like to play the game interactively? (Y/n): y
+
+?- show_clues.
+?- hint(1).
+?- check_answer(butler).
+?- solve(X).
+?- halt.
 ```
 
 The console app automatically retries failed code with LLM-generated fixes.

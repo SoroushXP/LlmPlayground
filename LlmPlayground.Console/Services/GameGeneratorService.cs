@@ -103,7 +103,20 @@ public sealed class GameGeneratorService : IGameGeneratorService
                         executionError = outputValidation.Error;
                     }
 
-                    // Only stop if execution was truly successful with meaningful output
+                    // If main/0 passed, also validate that solve(X) works
+                    if (executionResult.Success && outputValidation.IsValid)
+                    {
+                        ConsoleStyles.Muted("Validating puzzle logic (testing solve(X))...");
+                        var solveValidation = await ValidateSolvePredicateAsync(generatedFilePath, currentCode, cancellationToken);
+                        if (!solveValidation.IsValid)
+                        {
+                            executionSuccess = false;
+                            executionError = solveValidation.Error;
+                            outputValidation = (false, solveValidation.Error);
+                        }
+                    }
+
+                    // Only stop if execution was truly successful with meaningful output and valid solve/1
                     if (executionResult.Success && outputValidation.IsValid)
                     {
                         break;
@@ -392,6 +405,173 @@ public sealed class GameGeneratorService : IGameGeneratorService
         }
 
         return (true, null);
+    }
+
+    private async Task<(bool IsValid, string? Error)> ValidateSolvePredicateAsync(
+        string prologFilePath,
+        string prologCode,
+        CancellationToken cancellationToken)
+    {
+        // Check if solve/2 exists instead of solve/1 - this is a common mistake
+        var hasSolve2 = System.Text.RegularExpressions.Regex.IsMatch(prologCode, @"solve\s*\(\s*\w+\s*,\s*\w+\s*\)");
+        var hasSolve1 = System.Text.RegularExpressions.Regex.IsMatch(prologCode, @"solve\s*\(\s*\w+\s*\)\s*:-");
+
+        if (hasSolve2 && !hasSolve1)
+        {
+            return (false, "You defined solve/2 (two arguments) but the game requires solve/1 (one argument). " +
+                "The solve/1 predicate must return just ONE answer - the culprit/solution. " +
+                "Example: solve(X) :- suspect(X), was_at_scene(X), has_motive(X). " +
+                "If you need to return multiple values, use solve(answer(Suspect, Item)) or just solve(Suspect).");
+        }
+
+        // Run solve(X) and capture the result
+        var solveResult = await ExecutePrologCodeAsync(prologFilePath, "solve(X), format('SOLUTION:~w~n', [X])", cancellationToken);
+
+        if (!solveResult.Success)
+        {
+            var errorMsg = solveResult.Error ?? "";
+            if (errorMsg.Contains("solve/2"))
+            {
+                return (false, "You defined solve/2 (two arguments) but the game requires solve/1 (one argument). " +
+                    "Change solve(X, Y) to solve(X) where X is the single answer. " +
+                    "Example: solve(X) :- suspect(X), was_at_scene(X), has_motive(X).");
+            }
+
+            // Provide detailed diagnosis for silent failures
+            var diagnosis = BuildSolveDiagnosis(prologCode, errorMsg);
+            return (false, diagnosis);
+        }
+
+        // Check if solve(X) returned a result
+        if (string.IsNullOrWhiteSpace(solveResult.Output) || !solveResult.Output.Contains("SOLUTION:"))
+        {
+            var diagnosis = BuildSolveDiagnosis(prologCode, "solve(X) returned false (no solution found)");
+            return (false, diagnosis);
+        }
+
+        // Extract the solution
+        var solutionMatch = System.Text.RegularExpressions.Regex.Match(solveResult.Output, @"SOLUTION:(\w+)");
+        if (!solutionMatch.Success)
+        {
+            return (false, "The solve(X) predicate returned an invalid answer format. Expected an atom like 'frank' or 'bob'.");
+        }
+
+        var solution = solutionMatch.Groups[1].Value;
+
+        // Check if solve/1 is hardcoded (just returns a fact without deduction)
+        // Look for patterns like "solve(frank)." or "solve(X) :- X = frank."
+        var hardcodedPatterns = new[]
+        {
+            $@"solve\s*\(\s*{solution}\s*\)\s*\.",  // solve(frank).
+            $@"solve\s*\(\s*_?\w*\s*\)\s*:-\s*_?\w*\s*=\s*{solution}\s*\.",  // solve(X) :- X = frank.
+            $@"solve\s*\(\s*X\s*\)\s*:-\s*solution\s*\(\s*X\s*\)\s*\."  // solve(X) :- solution(X). with solution(frank).
+        };
+
+        var hasHardcodedSolve = hardcodedPatterns.Any(pattern =>
+            System.Text.RegularExpressions.Regex.IsMatch(prologCode, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+
+        // Also check if there's a simple "solution(answer)." fact that solve/1 just returns
+        var hasSolutionFact = System.Text.RegularExpressions.Regex.IsMatch(prologCode, $@"solution\s*\(\s*{solution}\s*\)\s*\.");
+        var solveJustCallsSolution = System.Text.RegularExpressions.Regex.IsMatch(prologCode, @"solve\s*\(\s*X\s*\)\s*:-\s*solution\s*\(\s*X\s*\)\s*\.");
+
+        if (hasSolutionFact && solveJustCallsSolution)
+        {
+            return (false, $"The solve(X) predicate just returns a hardcoded answer from solution({solution}). It must DEDUCE the answer using logical rules that query the puzzle facts. Example: solve(X) :- suspect(X), was_at_scene(X), has_motive(X), \\+ has_alibi(X).");
+        }
+
+        if (hasHardcodedSolve)
+        {
+            return (false, $"The solve(X) predicate appears to be hardcoded to return '{solution}' without logical deduction. Rewrite solve/1 to deduce the answer from the clues using Prolog rules.");
+        }
+
+        return (true, null);
+    }
+
+    /// <summary>
+    /// Builds a detailed diagnosis message when solve/1 fails, helping the LLM understand exactly what went wrong.
+    /// </summary>
+    private static string BuildSolveDiagnosis(string prologCode, string originalError)
+    {
+        var diagnosis = new System.Text.StringBuilder();
+        diagnosis.AppendLine("*** solve(X) FAILED - DETAILED DIAGNOSIS ***");
+        diagnosis.AppendLine();
+
+        // Try to find the solve/1 definition
+        var solveMatch = System.Text.RegularExpressions.Regex.Match(
+            prologCode,
+            @"solve\s*\(\s*\w+\s*\)\s*:-\s*([^.]+)\.",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+
+        if (solveMatch.Success)
+        {
+            var solveBody = solveMatch.Groups[1].Value.Trim();
+            diagnosis.AppendLine($"Your solve/1 definition: solve(X) :- {solveBody}.");
+            diagnosis.AppendLine();
+
+            // Extract predicates called by solve/1
+            var predicateCalls = System.Text.RegularExpressions.Regex.Matches(
+                solveBody,
+                @"(\w+)\s*\([^)]+\)");
+
+            if (predicateCalls.Count > 0)
+            {
+                diagnosis.AppendLine("Predicates called by solve/1:");
+                foreach (System.Text.RegularExpressions.Match call in predicateCalls)
+                {
+                    var predCall = call.Value;
+                    diagnosis.AppendLine($"  - {predCall}");
+
+                    // Check if there are any matching facts for this predicate
+                    var predName = call.Groups[1].Value;
+                    var factPattern = $@"^{predName}\s*\([^)]+\)\s*\.";
+                    var hasFacts = System.Text.RegularExpressions.Regex.IsMatch(
+                        prologCode,
+                        factPattern,
+                        System.Text.RegularExpressions.RegexOptions.Multiline);
+
+                    if (!hasFacts)
+                    {
+                        diagnosis.AppendLine($"    ^^^ WARNING: No facts found for {predName}/N!");
+                    }
+                }
+                diagnosis.AppendLine();
+            }
+        }
+        else
+        {
+            diagnosis.AppendLine("Could not find solve/1 definition in the code!");
+            diagnosis.AppendLine("Make sure you have: solve(X) :- <body>.");
+            diagnosis.AppendLine();
+        }
+
+        diagnosis.AppendLine("MOST LIKELY PROBLEM:");
+        diagnosis.AppendLine("solve/1 queries predicates that have NO MATCHING FACTS.");
+        diagnosis.AppendLine();
+        diagnosis.AppendLine("Example of this bug:");
+        diagnosis.AppendLine("  % Facts defined:");
+        diagnosis.AppendLine("  at(alice, kitchen, noon).");
+        diagnosis.AppendLine("  at(bob, garden, evening).");
+        diagnosis.AppendLine("  % solve/1 requires:");
+        diagnosis.AppendLine("  solve(X) :- at(X, gallery, morning).  % FAILS! No one matches!");
+        diagnosis.AppendLine();
+        diagnosis.AppendLine("HOW TO FIX:");
+        diagnosis.AppendLine("Option A: Add the missing fact that makes one suspect match:");
+        diagnosis.AppendLine("  at(carol, gallery, morning).  % Now solve(X) returns carol");
+        diagnosis.AppendLine();
+        diagnosis.AppendLine("Option B (RECOMMENDED): Use elimination pattern:");
+        diagnosis.AppendLine("  suspect(alice). suspect(bob). suspect(carol).");
+        diagnosis.AppendLine("  has_alibi(alice).  % Alice was elsewhere");
+        diagnosis.AppendLine("  has_alibi(bob).    % Bob was at party");
+        diagnosis.AppendLine("  % Carol has NO alibi - she's guilty!");
+        diagnosis.AppendLine("  solve(X) :- suspect(X), \\+ has_alibi(X).  % Returns carol");
+        diagnosis.AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(originalError))
+        {
+            diagnosis.AppendLine($"Original error: {originalError}");
+        }
+
+        return diagnosis.ToString();
     }
 
     private sealed class TimingCollector

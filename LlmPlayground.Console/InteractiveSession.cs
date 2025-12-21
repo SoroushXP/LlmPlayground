@@ -269,6 +269,61 @@ public class InteractiveSession
         }
 
         ConsoleStyles.Blank();
+
+        // Offer to play the game interactively if execution was successful
+        if (result.ExecutionSuccess == true && !string.IsNullOrEmpty(result.GeneratedFilePath))
+        {
+            OfferInteractivePlay(result.GeneratedFilePath);
+        }
+    }
+
+    private void OfferInteractivePlay(string prologFilePath)
+    {
+        ConsoleStyles.Info("Would you like to play the game interactively? (Y/n):");
+        ConsoleStyles.Prompt();
+        var playInput = System.Console.ReadLine()?.Trim();
+        var wantsToPlay = string.IsNullOrEmpty(playInput) ||
+                          playInput.Equals("y", StringComparison.OrdinalIgnoreCase) ||
+                          playInput.Equals("yes", StringComparison.OrdinalIgnoreCase);
+
+        if (!wantsToPlay)
+        {
+            return;
+        }
+
+        ConsoleStyles.Blank();
+        ConsoleStyles.Header("Interactive Prolog Session", ConsoleStyles.Emoji.Sparkles);
+        ConsoleStyles.Muted("Type Prolog queries at the '?-' prompt. Examples:");
+        ConsoleStyles.Muted("  main.          - Run the game demonstration again");
+        ConsoleStyles.Muted("  halt.          - Exit the Prolog session");
+        ConsoleStyles.Muted("  listing.       - Show all defined predicates");
+        ConsoleStyles.Blank();
+        ConsoleStyles.Warning("Starting SWI-Prolog... (type 'halt.' to return)");
+        ConsoleStyles.Blank();
+
+        try
+        {
+            var processInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "swipl",
+                Arguments = $"-s \"{prologFilePath}\"",
+                UseShellExecute = false,
+                RedirectStandardInput = false,
+                RedirectStandardOutput = false,
+                RedirectStandardError = false
+            };
+
+            using var process = System.Diagnostics.Process.Start(processInfo);
+            process?.WaitForExit();
+        }
+        catch (Exception ex)
+        {
+            ConsoleStyles.Error($"Failed to start Prolog: {ex.Message}");
+        }
+
+        ConsoleStyles.Blank();
+        ConsoleStyles.Success("Returned from Prolog session.");
+        ConsoleStyles.Blank();
     }
 
     private async Task ProcessPromptAsync(string input, CancellationToken cancellationToken)

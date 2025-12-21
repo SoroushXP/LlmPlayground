@@ -94,13 +94,36 @@ Customize colors in the `"Console"` section:
 
 ## Game Generation
 
-The `game` command launches an interactive workflow to generate Prolog logic games:
+The `game` command generates **solvable logic puzzle games** using AI:
 
-1. Enter an optional theme (e.g., "pirate treasure")
+1. Enter an optional theme (e.g., "pirate treasure", "detective mystery")
 2. Provide additional requirements (optional)
 3. Choose whether to execute the generated game
-4. The AI generates a game concept and Prolog code
-5. If execution fails, the AI attempts to fix the code (up to 10 retries)
+4. The AI generates a puzzle concept with clues and a hidden solution
+5. Self-healing: If execution fails, the AI automatically fixes the code (up to 10 retries)
+6. After successful execution, you can play interactively in the Prolog interpreter
+
+### Playing the Game
+
+Once a game is generated and validated, you'll be dropped into an interactive Prolog session:
+
+```prolog
+?- show_clues.     % Display all puzzle clues
+?- hint(1).        % Get hint #1
+?- hint(2).        % Get hint #2
+?- solve(X).       % Find the answer (spoiler!)
+?- check_answer(butler).  % Verify your guess
+?- halt.           % Exit the game
+```
+
+### Puzzle Structure
+
+Generated puzzles include:
+- **A hidden secret** - Who did it? Where is the treasure? Which box has the prize?
+- **Clues** - Logical constraints that lead to exactly one solution
+- **solve/1** - Predicate that deduces the answer from clues
+- **check_answer/1** - Verify your guess without spoilers
+- **hint/1** - Progressive hints if you're stuck
 
 Generated games are saved to the `GeneratedGames` directory.
 

@@ -158,19 +158,39 @@ public class GameGeneratorServiceTests
             PrologGoal = "main"
         };
 
+        // Output must have 5+ lines to pass validation
+        var validOutput = """
+            Welcome to the Puzzle Game!
+            ===========================
+            Clue 1: The answer is hidden
+            Clue 2: Look for patterns
+            Query: solve(X) = true
+            Type solve(X) to find the answer!
+            """;
+
+        // Prolog code with proper solve/1 that uses deduction (not hardcoded)
+        var prologCode = """
+            ```prolog
+            suspect(bob).
+            suspect(alice).
+            has_motive(bob).
+            was_at_scene(bob).
+            solve(X) :- suspect(X), has_motive(X), was_at_scene(X).
+            main :- write('Puzzle Game').
+            ```
+            """;
+
         _llmService.CurrentProvider.Returns("Ollama");
         _llmService.ChatAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
             .Returns(
                 new CompletionResponse { Text = "A puzzle game", TokensGenerated = 20 },
-                new CompletionResponse { Text = "```prolog\nmain :- write('Solved!').\n```", TokensGenerated = 20 });
+                new CompletionResponse { Text = prologCode, TokensGenerated = 20 });
 
+        // First call is for main, second call is for solve(X) validation
         _prologService.ExecuteFileAsync(Arg.Any<PrologFileRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new PrologResponse
-            {
-                Success = true,
-                Output = "Solved!",
-                ExitCode = 0
-            });
+            .Returns(
+                new PrologResponse { Success = true, Output = validOutput, ExitCode = 0 },
+                new PrologResponse { Success = true, Output = "SOLUTION:bob", ExitCode = 0 });
 
         // Act
         var result = await _sut.GenerateGameAsync(request);
@@ -178,10 +198,11 @@ public class GameGeneratorServiceTests
         // Assert
         result.Success.Should().BeTrue();
         result.ExecutionSuccess.Should().BeTrue();
-        result.ExecutionOutput.Should().Be("Solved!");
+        result.ExecutionOutput.Should().Be(validOutput);
         result.Timings?.PrologExecution.Should().NotBeNull();
 
-        await _prologService.Received(1)
+        // Should be called twice: once for main, once for solve(X) validation
+        await _prologService.Received(2)
             .ExecuteFileAsync(Arg.Any<PrologFileRequest>(), Arg.Any<CancellationToken>());
     }
 
@@ -242,14 +263,37 @@ public class GameGeneratorServiceTests
         // Arrange
         var request = new GameGenerationRequest { ExecuteGame = true };
 
+        // Output must have 5+ lines to pass validation
+        var validOutput = """
+            Welcome to the Game!
+            Line 2
+            Line 3
+            Query result = true
+            Line 5
+            """;
+
+        // Prolog code with proper solve/1 that uses deduction
+        var prologCode = """
+            ```prolog
+            suspect(carol).
+            has_motive(carol).
+            was_at_scene(carol).
+            solve(X) :- suspect(X), has_motive(X), was_at_scene(X).
+            main.
+            ```
+            """;
+
         _llmService.CurrentProvider.Returns("Ollama");
         _llmService.ChatAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
             .Returns(
                 new CompletionResponse { Text = "Game", TokensGenerated = 5 },
-                new CompletionResponse { Text = "```prolog\nmain.\n```", TokensGenerated = 5 });
+                new CompletionResponse { Text = prologCode, TokensGenerated = 5 });
 
+        // First call is for main, second call is for solve(X) validation
         _prologService.ExecuteFileAsync(Arg.Any<PrologFileRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new PrologResponse { Success = true, Output = "OK" });
+            .Returns(
+                new PrologResponse { Success = true, Output = validOutput },
+                new PrologResponse { Success = true, Output = "SOLUTION:carol" });
 
         // Act
         var result = await _sut.GenerateGameAsync(request);
@@ -301,6 +345,124 @@ public class GameGeneratorServiceTests
         // Should not have called Prolog service at all
         await _prologService.DidNotReceive()
             .ExecuteFileAsync(Arg.Any<PrologFileRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GenerateGameAsync_WithInsufficientOutput_MarksExecutionAsFailed()
+    {
+        // Arrange - Output with only 2 lines (below minimum of 5)
+        var request = new GameGenerationRequest
+        {
+            Theme = "puzzle",
+            ExecuteGame = true
+        };
+
+        _llmService.CurrentProvider.Returns("Ollama");
+        _llmService.ChatAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(
+                new CompletionResponse { Text = "A puzzle game", TokensGenerated = 20 },
+                new CompletionResponse { Text = "```prolog\nmain :- write('Done').\n```", TokensGenerated = 20 });
+
+        _prologService.ExecuteFileAsync(Arg.Any<PrologFileRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new PrologResponse
+            {
+                Success = true,
+                Output = "Done\nEnd",  // Only 2 lines - insufficient
+                ExitCode = 0
+            });
+
+        // Act
+        var result = await _sut.GenerateGameAsync(request);
+
+        // Assert - Execution should be marked as failed due to insufficient output
+        result.Success.Should().BeTrue();  // Generation succeeded
+        result.ExecutionSuccess.Should().BeFalse();  // But execution validation failed
+        result.ExecutionError.Should().Contain("line");  // Error mentions line count
+    }
+
+    [Fact]
+    public async Task GenerateGameAsync_WithSufficientOutput_MarksExecutionAsSuccess()
+    {
+        // Arrange - Output with 6 lines (above minimum of 5)
+        var request = new GameGenerationRequest
+        {
+            Theme = "puzzle",
+            ExecuteGame = true
+        };
+
+        // Prolog code with proper solve/1 that uses deduction
+        var prologCode = """
+            ```prolog
+            suspect(alice).
+            suspect(bob).
+            has_motive(alice).
+            was_at_scene(alice).
+            solve(X) :- suspect(X), has_motive(X), was_at_scene(X).
+            main :- write('Hello').
+            ```
+            """;
+
+        _llmService.CurrentProvider.Returns("Ollama");
+        _llmService.ChatAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(
+                new CompletionResponse { Text = "A puzzle game", TokensGenerated = 20 },
+                new CompletionResponse { Text = prologCode, TokensGenerated = 20 });
+
+        var sufficientOutput = """
+            Welcome to the Puzzle Game!
+            ===========================
+            Clue 1: The answer is hidden
+            Clue 2: Look for patterns
+            Query: solve(X) = true
+            Type solve(X) to find the answer
+            """;
+
+        // First call is for main, second call is for solve(X) validation
+        _prologService.ExecuteFileAsync(Arg.Any<PrologFileRequest>(), Arg.Any<CancellationToken>())
+            .Returns(
+                new PrologResponse { Success = true, Output = sufficientOutput, ExitCode = 0 },
+                new PrologResponse { Success = true, Output = "SOLUTION:alice", ExitCode = 0 });
+
+        // Act
+        var result = await _sut.GenerateGameAsync(request);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ExecutionSuccess.Should().BeTrue();
+        result.ExecutionOutput.Should().Be(sufficientOutput);
+    }
+
+    [Fact]
+    public async Task GenerateGameAsync_WithEmptyOutput_MarksExecutionAsFailed()
+    {
+        // Arrange
+        var request = new GameGenerationRequest
+        {
+            Theme = "puzzle",
+            ExecuteGame = true
+        };
+
+        _llmService.CurrentProvider.Returns("Ollama");
+        _llmService.ChatAsync(Arg.Any<ChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(
+                new CompletionResponse { Text = "A puzzle game", TokensGenerated = 20 },
+                new CompletionResponse { Text = "```prolog\nmain.\n```", TokensGenerated = 20 });
+
+        _prologService.ExecuteFileAsync(Arg.Any<PrologFileRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new PrologResponse
+            {
+                Success = true,
+                Output = "",  // Empty output
+                ExitCode = 0
+            });
+
+        // Act
+        var result = await _sut.GenerateGameAsync(request);
+
+        // Assert
+        result.Success.Should().BeTrue();  // Generation succeeded
+        result.ExecutionSuccess.Should().BeFalse();  // But output validation failed
+        result.ExecutionError.Should().Contain("no output");
     }
 }
 
