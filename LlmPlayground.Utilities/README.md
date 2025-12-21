@@ -12,6 +12,19 @@ This project provides reusable utilities that protect the core services from pot
 LlmPlayground.Utilities/
 ├── Extensions/
 │   └── ServiceCollectionExtensions.cs   # DI registration extensions
+├── Logging/
+│   ├── ConsoleInterceptor.cs            # Console output capture
+│   ├── ILogFormatter.cs                 # Log formatting interfaces
+│   ├── ILoggerService.cs                # Logger service interface
+│   ├── ILogSink.cs                      # Sink abstraction
+│   ├── LogEntry.cs                      # Log entry models
+│   ├── LoggerService.cs                 # Main logger implementation
+│   ├── LoggingConfiguration.cs          # Configuration & builder
+│   ├── LoggingExtensions.cs             # Extension methods
+│   ├── LogLevel.cs                      # Log level enum
+│   └── Sinks/
+│       ├── ConsoleSink.cs               # Console output sink
+│       └── FileSink.cs                  # File sink with rolling
 ├── Sanitization/
 │   └── InputSanitizer.cs                # Input cleaning utilities
 └── Validation/
@@ -249,6 +262,178 @@ This registers:
 2. **Authentication/Authorization** - Use ASP.NET Core Identity or similar
 3. **Rate Limiting** - Use middleware like AspNetCoreRateLimit
 4. **SQL Injection** - Use parameterized queries in your data layer
+
+## Centralized Logging System
+
+The utilities library includes a comprehensive, professional logging system with console output interception.
+
+### Features
+
+- **Multiple Sinks** - Log to console and/or files simultaneously
+- **Rolling File Support** - Daily or size-based file rotation with retention policies
+- **Console Interception** - Automatically capture all `Console.Write`/`WriteLine` calls
+- **Structured Logging** - Rich log entries with properties, correlation IDs, and context
+- **Async Support** - Non-blocking file writes with configurable buffering
+- **DI Integration** - Full Microsoft.Extensions.DependencyInjection support
+
+### Quick Start
+
+```csharp
+using LlmPlayground.Utilities.Extensions;
+using LlmPlayground.Utilities.Logging;
+
+// Option 1: Default configuration
+services.AddLlmPlaygroundLogging();
+
+// Option 2: Custom configuration
+services.AddLlmPlaygroundLogging(new LoggingConfiguration
+{
+    MinimumLevel = LogLevel.Debug,
+    EnableConsoleSink = true,
+    EnableFileSink = true,
+    FileDirectory = "logs",
+    InterceptConsoleOutput = true
+});
+
+// Option 3: Builder pattern
+services.AddLlmPlaygroundLogging(builder => builder
+    .WithMinimumLevel(LogLevel.Debug)
+    .WithConsoleSink(LogLevel.Information, useColors: true)
+    .WithFileSink("logs", LogLevel.Debug, RollingPolicy.Daily, retainDays: 7)
+    .WithConsoleInterception());
+
+// Option 4: Full utilities with logging
+services.AddLlmPlaygroundFullUtilities(
+    logDirectory: "logs",
+    interceptConsole: true);
+```
+
+### Using the Logger
+
+```csharp
+public class MyService
+{
+    private readonly ILoggerService _logger;
+    private readonly ILoggerScope _log;
+
+    public MyService(ILoggerService logger)
+    {
+        _logger = logger;
+        _log = logger.CreateScope("MyService");
+    }
+
+    public void DoWork()
+    {
+        _log.Information("Starting work...");
+        
+        try
+        {
+            // Work here
+            _log.Debug("Processing item");
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Failed to complete work", ex);
+            throw;
+        }
+    }
+}
+```
+
+### Extension Methods
+
+```csharp
+// Auto-detect source from caller info
+_logger.LogInfo("Message"); // Source: ClassName.MethodName
+
+// Timed operations
+await _logger.LogTimedAsync("Database query", async () =>
+{
+    await db.ExecuteAsync();
+}); // Output: "Database query completed in 45ms"
+
+// Structured logging with properties
+_logger.LogStructured(LogLevel.Information, "User action", new Dictionary<string, object?>
+{
+    ["UserId"] = userId,
+    ["Action"] = "Login"
+});
+```
+
+### Console Interception
+
+When enabled, all console output is automatically routed through the logging system:
+
+```csharp
+var logger = new LoggerBuilder()
+    .WithFileSink("logs")
+    .WithConsoleInterception()
+    .Build();
+
+// These now get logged to file as well:
+Console.WriteLine("This message appears in logs!");
+Console.Error.WriteLine("Errors logged at Warning level");
+```
+
+### Correlation IDs for Distributed Tracing
+
+```csharp
+using (logger.BeginCorrelationScope("request-12345"))
+{
+    logger.Information("Processing request");
+    // All logs in this scope include the correlation ID
+    await ProcessRequestAsync();
+}
+```
+
+### Log Formatters
+
+```csharp
+// Default formatter with options
+var formatter = new DefaultLogFormatter(new LogFormatterOptions
+{
+    IncludeTimestamp = true,
+    UseUtcTimestamp = true,
+    TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff",
+    UseShortLevelNames = true,  // INF, WRN, ERR
+    IncludeThreadId = true,
+    IncludeCorrelationId = true,
+    IncludeSource = true,
+    IncludeProperties = true,
+    IncludeFullException = true
+});
+
+// JSON formatter for structured log analysis
+var jsonFormatter = new JsonLogFormatter();
+```
+
+### File Sink Configuration
+
+```csharp
+var fileSink = new FileSink(new FileSinkOptions
+{
+    Directory = "logs",
+    FileNamePrefix = "app_",
+    RollingPolicy = RollingPolicy.Daily,  // New file each day (or Size, Never)
+    MaxFileSizeBytes = 10 * 1024 * 1024,  // 10 MB (for Size policy)
+    RetainDays = 7,                        // Auto-delete files older than 7 days
+    BufferSize = 100,                      // Entries before flush
+    FlushIntervalSeconds = 5
+});
+```
+
+### Log Levels
+
+| Level | Description |
+|-------|-------------|
+| `Trace` | Detailed tracing for development |
+| `Debug` | Debugging information |
+| `Information` | General application flow |
+| `Console` | Captured console output |
+| `Warning` | Potentially harmful situations |
+| `Error` | Errors that allow continued operation |
+| `Critical` | Application failures |
+| `None` | Disables logging (filter only) |
 
 ## Project Dependencies
 
