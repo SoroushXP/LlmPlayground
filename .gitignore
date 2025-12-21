@@ -71,11 +71,12 @@ _TeamCity*
 # Publish profiles
 *.publishsettings
 
-# Models (large files)
+# Models (large ML model files)
 *.gguf
 *.bin
 *.safetensors
-models/
+/models/
+!**/LlmPlayground.Services/Models/
 
 # OS files
 .DS_Store
