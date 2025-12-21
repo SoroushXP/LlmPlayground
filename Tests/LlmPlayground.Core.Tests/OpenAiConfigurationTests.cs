@@ -17,7 +17,8 @@ public class OpenAiConfigurationTests
         // Assert
         config.Model.Should().Be("gpt-4o-mini");
         config.SystemPrompt.Should().BeNull();
-        config.BaseUrl.Should().BeNull();
+        config.BaseUrlOverride.Should().BeNull();
+        config.BaseUrl.Should().Be("https://api.openai.com/v1");
         config.TimeoutSeconds.Should().Be(120);
     }
 
@@ -43,7 +44,7 @@ public class OpenAiConfigurationTests
             ApiKey = "sk-key",
             Model = "gpt-4",
             SystemPrompt = "You are a helpful assistant.",
-            BaseUrl = "https://custom.openai.azure.com",
+            BaseUrlOverride = "https://custom.openai.azure.com",
             TimeoutSeconds = 60
         };
 

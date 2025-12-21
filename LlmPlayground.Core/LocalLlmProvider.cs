@@ -3,6 +3,8 @@ using System.Runtime.CompilerServices;
 using LLama;
 using LLama.Common;
 using LLama.Native;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace LlmPlayground.Core;
 
@@ -70,12 +72,18 @@ public record LocalLlmConfiguration
 public sealed class LocalLlmProvider : ILlmProvider
 {
     private readonly LocalLlmConfiguration _configuration;
+    private readonly ILogger _logger;
     private LLamaWeights? _model;
     private LLamaContext? _context;
     private InteractiveExecutor? _executor;
     private bool _disposed;
 
-    public LocalLlmProvider(LocalLlmConfiguration configuration)
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LocalLlmProvider"/> class.
+    /// </summary>
+    /// <param name="configuration">Local LLM configuration.</param>
+    /// <param name="logger">Optional logger instance.</param>
+    public LocalLlmProvider(LocalLlmConfiguration configuration, ILogger<LocalLlmProvider>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
@@ -86,6 +94,7 @@ public sealed class LocalLlmProvider : ILlmProvider
             throw new FileNotFoundException($"Model file not found: {configuration.ModelPath}");
 
         _configuration = configuration;
+        _logger = logger ?? NullLogger<LocalLlmProvider>.Instance;
     }
 
     /// <inheritdoc />
@@ -102,6 +111,9 @@ public sealed class LocalLlmProvider : ILlmProvider
         if (_executor != null)
             return Task.CompletedTask;
 
+        _logger.LogInformation("Initializing LocalLlm with backend {Backend}, model {ModelPath}",
+            _configuration.Backend, _configuration.ModelPath);
+
         // Configure the native library based on backend type
         ConfigureBackend();
 
@@ -113,9 +125,14 @@ public sealed class LocalLlmProvider : ILlmProvider
             MainGpu = _configuration.GpuDeviceIndex
         };
 
+        _logger.LogDebug("Loading model with ContextSize={ContextSize}, GpuLayers={GpuLayers}, Threads={Threads}",
+            _configuration.ContextSize, _configuration.GpuLayerCount, _configuration.ThreadCount);
+
         _model = LLamaWeights.LoadFromFile(parameters);
         _context = _model.CreateContext(parameters);
         _executor = new InteractiveExecutor(_context);
+
+        _logger.LogInformation("LocalLlm initialized successfully");
 
         return Task.CompletedTask;
     }
@@ -132,12 +149,14 @@ public sealed class LocalLlmProvider : ILlmProvider
             case LlmBackendType.Vulkan:
                 // Vulkan backend will be used if available (works with AMD, Intel, NVIDIA)
                 // The LLamaSharp.Backend.Vulkan package provides the native libraries
+                _logger.LogDebug("Configuring Vulkan backend");
                 NativeLibraryConfig.All.WithAutoFallback(false);
                 break;
 
             case LlmBackendType.Cuda:
                 // CUDA backend for NVIDIA GPUs
                 // Requires LLamaSharp.Backend.Cuda package (not included by default)
+                _logger.LogDebug("Configuring CUDA backend");
                 NativeLibraryConfig.All.WithAutoFallback(false);
                 NativeLibraryConfig.All.WithCuda(true);
                 break;
@@ -145,6 +164,7 @@ public sealed class LocalLlmProvider : ILlmProvider
             case LlmBackendType.Cpu:
             default:
                 // CPU-only backend
+                _logger.LogDebug("Configuring CPU backend");
                 NativeLibraryConfig.All.WithAutoFallback(true);
                 break;
         }
@@ -162,6 +182,8 @@ public sealed class LocalLlmProvider : ILlmProvider
         options ??= new LlmInferenceOptions();
         var inferenceParams = CreateInferenceParams(options);
 
+        _logger.LogDebug("Starting completion, MaxTokens={MaxTokens}", options.MaxTokens);
+
         var stopwatch = Stopwatch.StartNew();
         var tokens = new List<string>();
 
@@ -173,6 +195,10 @@ public sealed class LocalLlmProvider : ILlmProvider
         stopwatch.Stop();
 
         var fullText = string.Join("", tokens);
+
+        _logger.LogDebug("Completed in {Duration}ms, {Tokens} tokens",
+            stopwatch.ElapsedMilliseconds, tokens.Count);
+
         return new LlmCompletionResult(fullText, tokens.Count, stopwatch.Elapsed);
     }
 
@@ -188,6 +214,8 @@ public sealed class LocalLlmProvider : ILlmProvider
         options ??= new LlmInferenceOptions();
         var inferenceParams = CreateInferenceParams(options);
 
+        _logger.LogDebug("Starting streaming completion");
+
         await foreach (var token in _executor!.InferAsync(prompt, inferenceParams, cancellationToken))
         {
             yield return token;
@@ -202,6 +230,9 @@ public sealed class LocalLlmProvider : ILlmProvider
     {
         // For LocalLlm, format messages into a single prompt
         var prompt = FormatMessagesAsPrompt(messages);
+
+        _logger.LogDebug("Chat with {MessageCount} messages", messages.Count);
+
         return await CompleteAsync(prompt, options, cancellationToken);
     }
 
@@ -213,6 +244,9 @@ public sealed class LocalLlmProvider : ILlmProvider
     {
         // For LocalLlm, format messages into a single prompt
         var prompt = FormatMessagesAsPrompt(messages);
+
+        _logger.LogDebug("Streaming chat with {MessageCount} messages", messages.Count);
+
         await foreach (var token in CompleteStreamingAsync(prompt, options, cancellationToken))
         {
             yield return token;
@@ -264,20 +298,23 @@ public sealed class LocalLlmProvider : ILlmProvider
         ObjectDisposedException.ThrowIf(_disposed, this);
     }
 
+    /// <inheritdoc />
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+
+        _logger.LogDebug("Disposing LocalLlm provider");
 
         _executor = null;
         _context?.Dispose();
         _model?.Dispose();
     }
 
+    /// <inheritdoc />
     public ValueTask DisposeAsync()
     {
         Dispose();
         return ValueTask.CompletedTask;
     }
 }
-

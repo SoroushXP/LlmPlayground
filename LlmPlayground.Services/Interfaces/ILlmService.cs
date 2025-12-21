@@ -1,3 +1,4 @@
+using LlmPlayground.Core;
 using LlmPlayground.Services.Models;
 
 namespace LlmPlayground.Services.Interfaces;

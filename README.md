@@ -21,21 +21,40 @@ A .NET 9 library for connecting to various LLM (Large Language Model) APIs with 
 ```
 LlmPlayground/
 ├── LlmPlayground.sln
-├── LlmPlayground.Core/          # Class Library - LLM Providers
-│   ├── ILlmProvider.cs          # Base interface for all LLM providers
-│   ├── OpenAiProvider.cs        # OpenAI/ChatGPT provider
-│   ├── OllamaProvider.cs        # Ollama provider
-│   ├── LmStudioProvider.cs      # LM Studio provider
-│   └── LocalLlmProvider.cs      # Local GGUF model provider
-├── LlmPlayground.Prolog/        # Class Library - Prolog Runner
-│   ├── PrologRunner.cs          # Execute Prolog files and queries
-│   └── README.md                # Prolog-specific documentation
-├── LlmPlayground.Console/       # Console Demo App
+├── LlmPlayground.Core/               # Class Library - LLM Providers
+│   ├── ILlmProvider.cs               # Base interface for all LLM providers
+│   ├── ILlmProviderFactory.cs        # Factory interface and LlmProviderType enum
+│   ├── LlmProviderFactory.cs         # Factory implementation with DI support
+│   ├── OpenAiCompatibleProviderBase.cs # Base class for OpenAI-compatible APIs
+│   ├── OpenAiProvider.cs             # OpenAI/ChatGPT provider
+│   ├── OllamaProvider.cs             # Ollama provider
+│   ├── LmStudioProvider.cs           # LM Studio provider
+│   ├── LocalLlmProvider.cs           # Local GGUF model provider
+│   └── Extensions/
+│       └── ServiceCollectionExtensions.cs  # DI registration extensions
+├── LlmPlayground.Services/           # Service Layer (for API integration)
+│   ├── Interfaces/                   # Service interfaces
+│   ├── Services/                     # Service implementations
+│   └── Models/                       # DTOs for requests/responses
+├── LlmPlayground.Utilities/          # Validation & Sanitization
+│   ├── Validation/                   # Request validation
+│   └── Sanitization/                 # Input sanitization
+├── LlmPlayground.PromptLab/          # Prompt Engineering Library
+│   ├── PromptSession.cs              # Conversation session management
+│   ├── PromptTemplate.cs             # Template and builder utilities
+│   └── PromptLabFactory.cs           # Factory methods
+├── LlmPlayground.Prolog/             # Class Library - Prolog Runner
+│   ├── PrologRunner.cs               # Execute Prolog files and queries
+│   └── README.md                     # Prolog-specific documentation
+├── LlmPlayground.Console/            # Console Demo App
 │   ├── Program.cs
 │   └── appsettings.json
-└── Tests/                       # Unit Tests
+└── Tests/                            # Unit Tests
     ├── LlmPlayground.Core.Tests/
     ├── LlmPlayground.Console.Tests/
+    ├── LlmPlayground.Services.Tests/
+    ├── LlmPlayground.Utilities.Tests/
+    ├── LlmPlayground.PromptLab.Tests/
     └── LlmPlayground.Prolog.Tests/
 ```
 
@@ -267,7 +286,7 @@ dotnet run
 | `ApiKey` | string | *(required)* | OpenAI API key |
 | `Model` | string | `gpt-4o-mini` | Model to use (gpt-4, gpt-4o, gpt-3.5-turbo, o1-preview, etc.) |
 | `SystemPrompt` | string | `null` | Optional system prompt to set assistant behavior |
-| `BaseUrl` | string | `null` | Custom API endpoint (for Azure OpenAI or proxies) |
+| `BaseUrlOverride` | string | `null` | Custom API endpoint (for Azure OpenAI or proxies) |
 | `TimeoutSeconds` | int | `120` | Request timeout in seconds |
 
 **Supported Models:**
@@ -282,7 +301,7 @@ dotnet run
   "OpenAI": {
     "ApiKey": "your-azure-key",
     "Model": "gpt-4",
-    "BaseUrl": "https://your-resource.openai.azure.com"
+    "BaseUrlOverride": "https://your-resource.openai.azure.com"
   }
 }
 ```
@@ -428,7 +447,7 @@ These options can be passed to `CompleteAsync()` and `CompleteStreamingAsync()`:
     "ApiKey": "sk-your-api-key",
     "Model": "gpt-4o-mini",
     "SystemPrompt": "You are a helpful assistant.",
-    "BaseUrl": "",
+    "BaseUrlOverride": "",
     "TimeoutSeconds": 120
   },
   "Ollama": {
@@ -752,6 +771,75 @@ public class MyCustomProvider : ILlmProvider
     public ValueTask DisposeAsync() { /* ... */ }
 }
 ```
+
+## Dependency Injection Support
+
+The `LlmPlayground.Core` library provides full dependency injection support for ASP.NET Core and other DI-enabled applications.
+
+### Registration
+
+```csharp
+using LlmPlayground.Core.Extensions;
+
+// Register all providers from configuration
+builder.Services.AddLlmProviders(builder.Configuration);
+
+// Or register individual providers
+builder.Services.AddOllamaProvider(options =>
+{
+    options.Host = "localhost";
+    options.Port = 11434;
+    options.Model = "llama3";
+});
+
+builder.Services.AddOpenAiProvider(options =>
+{
+    options.ApiKey = "sk-your-key";
+    options.Model = "gpt-4o-mini";
+});
+```
+
+### Using the Factory
+
+```csharp
+public class MyService
+{
+    private readonly ILlmProviderFactory _factory;
+
+    public MyService(ILlmProviderFactory factory)
+    {
+        _factory = factory;
+    }
+
+    public async Task<string> GetResponseAsync(string prompt)
+    {
+        // Create a provider using the factory
+        using var provider = _factory.CreateProvider(LlmProviderType.Ollama);
+        await provider.InitializeAsync();
+        
+        var result = await provider.CompleteAsync(prompt);
+        return result.Text;
+    }
+}
+```
+
+### Configuration from appsettings.json
+
+```json
+{
+  "Ollama": {
+    "Host": "localhost",
+    "Port": 11434,
+    "Model": "llama3"
+  },
+  "OpenAI": {
+    "ApiKey": "your-api-key",
+    "Model": "gpt-4o-mini"
+  }
+}
+```
+
+The `ILlmProviderFactory` is registered as a singleton and manages `HttpClient` instances through `IHttpClientFactory` for proper resource management.
 
 ## License
 

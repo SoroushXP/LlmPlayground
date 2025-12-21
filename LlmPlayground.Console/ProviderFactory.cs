@@ -50,7 +50,7 @@ public class ProviderFactory
             ApiKey = apiKey,
             Model = _config.GetValue<string>("OpenAI:Model", "gpt-4o-mini") ?? "gpt-4o-mini",
             SystemPrompt = _config["OpenAI:SystemPrompt"],
-            BaseUrl = string.IsNullOrWhiteSpace(_config["OpenAI:BaseUrl"]) ? null : _config["OpenAI:BaseUrl"],
+            BaseUrlOverride = string.IsNullOrWhiteSpace(_config["OpenAI:BaseUrl"]) ? null : _config["OpenAI:BaseUrl"],
             TimeoutSeconds = _config.GetValue<int>("OpenAI:TimeoutSeconds", 120)
         };
 

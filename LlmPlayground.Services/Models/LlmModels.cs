@@ -133,13 +133,6 @@ public record ModelInfoDto
     public DateTime? Created { get; init; }
 }
 
-/// <summary>
-/// Available LLM provider types.
-/// </summary>
-public enum LlmProviderType
-{
-    Ollama,
-    LmStudio,
-    OpenAI
-}
+// LlmProviderType is defined in LlmPlayground.Core - use that instead
+// using LlmPlayground.Core.LlmProviderType;
 

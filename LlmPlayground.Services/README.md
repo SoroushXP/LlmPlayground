@@ -203,7 +203,7 @@ Configure providers in `appsettings.json`:
     "ApiKey": "your-api-key",
     "Model": "gpt-4o-mini",
     "SystemPrompt": null,
-    "BaseUrl": null,
+    "BaseUrlOverride": null,
     "TimeoutSeconds": 120
   },
   "Prolog": {
@@ -222,7 +222,7 @@ Configure providers in `appsettings.json`:
 - `InferenceOptionsDto` - Temperature, MaxTokens, TopP, RepeatPenalty
 - `CompletionResponse` - Response with text, tokens, duration
 - `ModelInfoDto` - Model information (id, owner, created)
-- `LlmProviderType` - Enum: Ollama, LmStudio, OpenAI
+- `LlmProviderType` - Enum from `LlmPlayground.Core`: Ollama, LmStudio, OpenAI, Local
 
 ### Prolog Models
 - `PrologQueryRequest` - Query string to execute

@@ -1,4 +1,5 @@
 using FluentAssertions;
+using LlmPlayground.Core;
 using LlmPlayground.Services.Models;
 
 namespace LlmPlayground.Services.Tests;
@@ -246,7 +247,7 @@ public class ModelsTests
             var values = Enum.GetValues<LlmProviderType>();
 
             // Assert
-            values.Should().HaveCount(3);
+            values.Should().HaveCount(4); // Ollama, LmStudio, OpenAI, Local
         }
     }
 }

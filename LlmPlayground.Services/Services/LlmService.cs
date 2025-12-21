@@ -234,7 +234,7 @@ public sealed class LlmService : ILlmService, IAsyncDisposable, IDisposable
             ApiKey = apiKey,
             Model = section["Model"] ?? "gpt-4o-mini",
             SystemPrompt = section["SystemPrompt"],
-            BaseUrl = string.IsNullOrWhiteSpace(section["BaseUrl"])
+            BaseUrlOverride = string.IsNullOrWhiteSpace(section["BaseUrl"])
                 ? null
                 : section["BaseUrl"],
             TimeoutSeconds = section.GetValue("TimeoutSeconds", 120)
