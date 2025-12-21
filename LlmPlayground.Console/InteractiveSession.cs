@@ -1,18 +1,25 @@
-using LlmPlayground.Core;
+using LlmPlayground.Services.Interfaces;
+using LlmPlayground.Services.Models;
 using Microsoft.Extensions.Configuration;
 
 namespace LlmPlayground.Console;
 
 /// <summary>
-/// Manages the interactive session with the LLM provider.
+/// Manages the interactive chat session with the LLM service.
 /// </summary>
 public class InteractiveSession
 {
+    private readonly ILlmService _llmService;
     private readonly IConfiguration _config;
     private readonly UserPreferences _preferences;
+    private readonly List<ChatMessageDto> _conversationHistory = [];
+    
+    private bool _streamingMode;
+    private InferenceOptionsDto _options = null!;
 
-    public InteractiveSession(IConfiguration config, UserPreferences preferences)
+    public InteractiveSession(ILlmService llmService, IConfiguration config, UserPreferences preferences)
     {
+        _llmService = llmService;
         _config = config;
         _preferences = preferences;
     }
@@ -20,48 +27,26 @@ public class InteractiveSession
     /// <summary>
     /// Executes a single prompt and returns (for non-interactive/silent mode).
     /// </summary>
-    /// <param name="provider">The LLM provider to use.</param>
-    /// <param name="prompt">The prompt to execute.</param>
-    /// <param name="cancellationToken">Cancellation token for stopping generation.</param>
-    public async Task ExecuteSinglePromptAsync(
-        ILlmProvider provider,
-        string prompt,
-        CancellationToken cancellationToken = default)
+    public async Task ExecuteSinglePromptAsync(string prompt, CancellationToken cancellationToken = default)
     {
-        var streamingMode = _preferences.StreamingMode ?? false;
-        var options = CreateInferenceOptions();
-        var conversationHistory = new List<ChatMessage>();
-
+        InitializeSettings();
         ConsoleStyles.KeyValue("Prompt", prompt);
-        await ProcessPromptAsync(provider, prompt, streamingMode, options, conversationHistory, cancellationToken);
+        await ProcessPromptAsync(prompt, cancellationToken);
     }
 
     /// <summary>
-    /// Runs the interactive loop with the given LLM provider.
+    /// Runs the interactive chat loop.
     /// </summary>
-    /// <param name="provider">The LLM provider to use.</param>
-    public async Task RunAsync(ILlmProvider provider)
+    public async Task RunAsync()
     {
-        // Load preferences or use config defaults
-        var streamingMode = _preferences.StreamingMode ?? false;
-        var options = CreateInferenceOptions();
-
-        // Initialize conversation history
-        var conversationHistory = new List<ChatMessage>();
-
-        // Show current settings
-        if (_preferences.StreamingMode.HasValue || _preferences.MaxTokens.HasValue)
-        {
-            ConsoleStyles.Muted(
-                $"[Loaded preferences: Streaming={streamingMode}, MaxTokens={options.MaxTokens}, Temp={options.Temperature:F1}]");
-        }
-
+        InitializeSettings();
+        ShowLoadedPreferences();
         ConsoleStyles.Muted("Commands: 'help', 'exit', 'stream', 'settings', 'reset', 'clear', 'history'");
         ConsoleStyles.Blank();
 
         while (true)
         {
-            ConsoleStyles.Prompt(streaming: streamingMode);
+            ConsoleStyles.Prompt(streaming: _streamingMode);
             var input = System.Console.ReadLine();
 
             if (string.IsNullOrWhiteSpace(input))
@@ -70,254 +55,196 @@ public class InteractiveSession
             if (input.Equals("exit", StringComparison.OrdinalIgnoreCase))
                 break;
 
-            if (input.Equals("help", StringComparison.OrdinalIgnoreCase))
-            {
-                ConsoleStyles.Header("Available Commands");
-                ConsoleStyles.Muted("  exit      - Exit the application");
-                ConsoleStyles.Muted("  help      - Show this help message");
-                ConsoleStyles.Muted("  stream    - Toggle streaming mode on/off");
-                ConsoleStyles.Muted("  settings  - Configure inference options");
-                ConsoleStyles.Muted("  reset     - Reset all saved preferences");
-                ConsoleStyles.Muted("  clear     - Clear conversation history");
-                ConsoleStyles.Muted("  history   - Show conversation history");
-                ConsoleStyles.Blank();
+            if (await HandleCommandAsync(input))
                 continue;
-            }
 
-            if (input.Equals("stream", StringComparison.OrdinalIgnoreCase))
-            {
-                streamingMode = !streamingMode;
-                _preferences.StreamingMode = streamingMode;
-                _preferences.Save();
-                ConsoleStyles.Success($"Streaming mode: {(streamingMode ? "ON" : "OFF")} (saved)");
-                ConsoleStyles.Blank();
-                continue;
-            }
-
-            if (input.Equals("clear", StringComparison.OrdinalIgnoreCase))
-            {
-                conversationHistory.Clear();
-                ConsoleStyles.Success("Conversation history cleared.");
-                ConsoleStyles.Blank();
-                continue;
-            }
-
-            if (input.Equals("history", StringComparison.OrdinalIgnoreCase))
-            {
-                if (conversationHistory.Count == 0)
-                {
-                    ConsoleStyles.Muted("No conversation history yet.");
-                }
-                else
-                {
-                    ConsoleStyles.Header($"Conversation History ({conversationHistory.Count} messages)");
-                    foreach (var msg in conversationHistory)
-                    {
-                        var role = msg.Role switch
-                        {
-                            ChatRole.System => "[System]",
-                            ChatRole.User => "[You]",
-                            ChatRole.Assistant => "[Assistant]",
-                            _ => "[Unknown]"
-                        };
-                        var preview = msg.Content.Length > 80
-                            ? msg.Content[..80] + "..."
-                            : msg.Content;
-                        preview = preview.Replace("\n", " ").Replace("\r", "");
-                        ConsoleStyles.Muted($"  {role} {preview}");
-                    }
-                }
-                ConsoleStyles.Blank();
-                continue;
-            }
-
-            if (input.Equals("settings", StringComparison.OrdinalIgnoreCase))
-            {
-                options = ConfigureSettings(options);
-                continue;
-            }
-
-            if (input.Equals("reset", StringComparison.OrdinalIgnoreCase))
-            {
-                ResetPreferences();
-                ConsoleStyles.Warning("Preferences reset. Restart the app to apply.");
-                ConsoleStyles.Blank();
-                continue;
-            }
-
-            // Create a per-request cancellation token that can be cancelled with Ctrl+C
-            using var requestCts = new CancellationTokenSource();
-
-            // Set up Ctrl+C handler for this request
-            void CancelHandler(object? sender, ConsoleCancelEventArgs e)
-            {
-                e.Cancel = true; // Prevent app termination
-                requestCts.Cancel();
-            }
-
-            System.Console.CancelKeyPress += CancelHandler;
-            try
-            {
-                await ProcessPromptAsync(provider, input, streamingMode, options, conversationHistory, requestCts.Token);
-            }
-            finally
-            {
-                System.Console.CancelKeyPress -= CancelHandler;
-            }
+            await ExecuteWithCancellationAsync(input);
         }
     }
 
-    private async Task ProcessPromptAsync(
-        ILlmProvider provider,
-        string input,
-        bool streamingMode,
-        LlmInferenceOptions options,
-        List<ChatMessage> conversationHistory,
-        CancellationToken cancellationToken)
+    private void InitializeSettings()
+    {
+        _streamingMode = _preferences.StreamingMode ?? false;
+        _options = CreateInferenceOptions();
+    }
+
+    private void ShowLoadedPreferences()
+    {
+        if (_preferences.StreamingMode.HasValue || _preferences.MaxTokens.HasValue)
+        {
+            ConsoleStyles.Muted(
+                $"[Loaded preferences: Streaming={_streamingMode}, MaxTokens={_options.MaxTokens}, Temp={_options.Temperature:F1}]");
+        }
+    }
+
+    private Task<bool> HandleCommandAsync(string input)
+    {
+        switch (input.ToLowerInvariant())
+        {
+            case "help":
+                ShowHelp();
+                return Task.FromResult(true);
+            case "stream":
+                ToggleStreamingMode();
+                return Task.FromResult(true);
+            case "clear":
+                _conversationHistory.Clear();
+                ConsoleStyles.Success("Conversation history cleared.");
+                ConsoleStyles.Blank();
+                return Task.FromResult(true);
+            case "history":
+                ShowHistory();
+                return Task.FromResult(true);
+            case "settings":
+                _options = ConfigureSettings();
+                return Task.FromResult(true);
+            case "reset":
+                ResetPreferences();
+                ConsoleStyles.Warning("Preferences reset. Restart the app to apply.");
+                ConsoleStyles.Blank();
+                return Task.FromResult(true);
+            default:
+                return Task.FromResult(false);
+        }
+    }
+
+    private async Task ExecuteWithCancellationAsync(string input)
+    {
+        using var requestCts = new CancellationTokenSource();
+
+        void CancelHandler(object? sender, ConsoleCancelEventArgs e)
+        {
+            e.Cancel = true;
+            requestCts.Cancel();
+        }
+
+        System.Console.CancelKeyPress += CancelHandler;
+        try
+        {
+            await ProcessPromptAsync(input, requestCts.Token);
+        }
+        finally
+        {
+            System.Console.CancelKeyPress -= CancelHandler;
+        }
+    }
+
+    private async Task ProcessPromptAsync(string input, CancellationToken cancellationToken)
     {
         var wasCancelled = false;
         try
         {
-            // Add user message to history
-            conversationHistory.Add(new ChatMessage(ChatRole.User, input));
-
+            _conversationHistory.Add(new ChatMessageDto { Role = "user", Content = input });
             ConsoleStyles.Blank();
-            if (streamingMode)
+
+            if (_streamingMode)
             {
-                ConsoleStyles.KeyValue("Response", "");
-                var responseBuilder = new System.Text.StringBuilder();
-                await foreach (var token in provider.ChatStreamingAsync(conversationHistory, options, cancellationToken))
-                {
-                    ConsoleStyles.ResponseToken(token);
-                    responseBuilder.Append(token);
-                }
-                // Add assistant response to history (even partial if cancelled)
-                var response = responseBuilder.ToString();
-                if (!string.IsNullOrEmpty(response))
-                {
-                    conversationHistory.Add(new ChatMessage(ChatRole.Assistant, response));
-                }
-                ConsoleStyles.Blank();
-                ConsoleStyles.Blank();
+                await ProcessStreamingResponseAsync(cancellationToken);
             }
             else
             {
-                ConsoleStyles.Status("Generating response... (Ctrl+C to cancel)");
-                var result = await provider.ChatAsync(conversationHistory, options, cancellationToken);
-                // Add assistant response to history
-                conversationHistory.Add(new ChatMessage(ChatRole.Assistant, result.Text));
-                ConsoleStyles.Blank();
-                ConsoleStyles.KeyValue("Response", result.Text);
-                ConsoleStyles.Stats(result.TokensGenerated, result.Duration.TotalSeconds);
-                ConsoleStyles.Blank();
+                await ProcessNonStreamingResponseAsync(cancellationToken);
             }
         }
         catch (OperationCanceledException)
         {
             wasCancelled = true;
-            ConsoleStyles.Blank();
-            ConsoleStyles.Warning("Generation cancelled.");
-            ConsoleStyles.Blank();
-            // Remove the user message if no response was generated
-            if (conversationHistory.Count > 0 && conversationHistory[^1].Role == ChatRole.User)
-            {
-                conversationHistory.RemoveAt(conversationHistory.Count - 1);
-            }
+            HandleCancellation();
         }
         catch (Exception ex) when (!wasCancelled)
         {
-            // Remove the failed user message from history
-            if (conversationHistory.Count > 0 && conversationHistory[^1].Role == ChatRole.User)
-            {
-                conversationHistory.RemoveAt(conversationHistory.Count - 1);
-            }
-            ConsoleStyles.Error(ex.Message);
-            ConsoleStyles.Blank();
+            HandleError(ex);
         }
     }
 
-    private LlmInferenceOptions ConfigureSettings(LlmInferenceOptions options)
+    private async Task ProcessStreamingResponseAsync(CancellationToken cancellationToken)
     {
-        ConsoleStyles.Header("Settings", ConsoleStyles.Emoji.Gear);
-        ConsoleStyles.MenuItem(1, $"Max Tokens: {options.MaxTokens}");
-        ConsoleStyles.MenuItem(2, $"Temperature: {options.Temperature:F2}");
-        ConsoleStyles.MenuItem(3, $"Top-P: {options.TopP:F2}");
-        ConsoleStyles.MenuItem(4, $"Repeat Penalty: {options.RepeatPenalty:F2}");
-        ConsoleStyles.Blank();
-        ConsoleStyles.Muted("Enter number to change, or press Enter to go back:");
-        ConsoleStyles.Prompt();
-
-        var input = System.Console.ReadLine();
-        if (string.IsNullOrWhiteSpace(input)) return options;
-
-        return input switch
+        var request = new ChatRequest
         {
-            "1" => ConfigureMaxTokens(options),
-            "2" => ConfigureTemperature(options),
-            "3" => ConfigureTopP(options),
-            "4" => ConfigureRepeatPenalty(options),
-            _ => options
+            Messages = _conversationHistory,
+            Options = _options
         };
+
+        var fullResponse = new System.Text.StringBuilder();
+
+        await foreach (var token in _llmService.ChatStreamingAsync(request, cancellationToken))
+        {
+            ConsoleStyles.ResponseToken(token);
+            fullResponse.Append(token);
+        }
+
+        ConsoleStyles.Blank();
+        ConsoleStyles.Blank();
+        _conversationHistory.Add(new ChatMessageDto { Role = "assistant", Content = fullResponse.ToString() });
     }
 
-    private LlmInferenceOptions ConfigureMaxTokens(LlmInferenceOptions options)
+    private async Task ProcessNonStreamingResponseAsync(CancellationToken cancellationToken)
     {
-        ConsoleStyles.KeyValue("Max Tokens", $"[{options.MaxTokens}]");
-        ConsoleStyles.Prompt();
-        if (int.TryParse(System.Console.ReadLine(), out var maxTokens) && maxTokens > 0)
+        ConsoleStyles.Muted("Thinking...");
+
+        var request = new ChatRequest
         {
-            options = options with { MaxTokens = maxTokens };
-            _preferences.MaxTokens = maxTokens;
-            _preferences.Save();
-            ConsoleStyles.Success($"Max Tokens set to {maxTokens} (saved)");
-        }
-        ConsoleStyles.Blank();
-        return options;
+            Messages = _conversationHistory,
+            Options = _options
+        };
+
+        var response = await _llmService.ChatAsync(request, cancellationToken);
+        ConsoleStyles.Response(response.Text);
+        _conversationHistory.Add(new ChatMessageDto { Role = "assistant", Content = response.Text });
     }
 
-    private LlmInferenceOptions ConfigureTemperature(LlmInferenceOptions options)
+    private static void HandleCancellation()
     {
-        ConsoleStyles.KeyValue("Temperature", $"[{options.Temperature:F2}]");
-        ConsoleStyles.Prompt();
-        if (float.TryParse(System.Console.ReadLine(), out var temp) && temp >= 0 && temp <= 2)
-        {
-            options = options with { Temperature = temp };
-            _preferences.Temperature = temp;
-            _preferences.Save();
-            ConsoleStyles.Success($"Temperature set to {temp:F2} (saved)");
-        }
         ConsoleStyles.Blank();
-        return options;
+        ConsoleStyles.Warning("Request cancelled.");
+        ConsoleStyles.Blank();
     }
 
-    private LlmInferenceOptions ConfigureTopP(LlmInferenceOptions options)
+    private static void HandleError(Exception ex)
     {
-        ConsoleStyles.KeyValue("Top-P", $"[{options.TopP:F2}]");
-        ConsoleStyles.Prompt();
-        if (float.TryParse(System.Console.ReadLine(), out var topP) && topP > 0 && topP <= 1)
-        {
-            options = options with { TopP = topP };
-            _preferences.TopP = topP;
-            _preferences.Save();
-            ConsoleStyles.Success($"Top-P set to {topP:F2} (saved)");
-        }
         ConsoleStyles.Blank();
-        return options;
+        ConsoleStyles.Error($"Error: {ex.Message}");
+        ConsoleStyles.Blank();
     }
 
-    private LlmInferenceOptions ConfigureRepeatPenalty(LlmInferenceOptions options)
+    private void ShowHelp()
     {
-        ConsoleStyles.KeyValue("Repeat Penalty", $"[{options.RepeatPenalty:F2}]");
-        ConsoleStyles.Prompt();
-        if (float.TryParse(System.Console.ReadLine(), out var penalty) && penalty >= 1)
+        ConsoleStyles.Header("Available Commands");
+        ConsoleStyles.Muted("  exit      - Exit the application");
+        ConsoleStyles.Muted("  help      - Show this help message");
+        ConsoleStyles.Muted("  stream    - Toggle streaming mode on/off");
+        ConsoleStyles.Muted("  settings  - Configure inference parameters");
+        ConsoleStyles.Muted("  reset     - Reset all saved preferences");
+        ConsoleStyles.Muted("  clear     - Clear conversation history");
+        ConsoleStyles.Muted("  history   - Show conversation history");
+        ConsoleStyles.Blank();
+    }
+
+    private void ToggleStreamingMode()
+    {
+        _streamingMode = !_streamingMode;
+        _preferences.StreamingMode = _streamingMode;
+        _preferences.Save();
+        ConsoleStyles.Success($"Streaming mode: {(_streamingMode ? "ON" : "OFF")} (saved)");
+        ConsoleStyles.Blank();
+    }
+
+    private void ShowHistory()
+    {
+        if (_conversationHistory.Count == 0)
         {
-            options = options with { RepeatPenalty = penalty };
-            _preferences.RepeatPenalty = penalty;
-            _preferences.Save();
-            ConsoleStyles.Success($"Repeat Penalty set to {penalty:F2} (saved)");
+            ConsoleStyles.Muted("No conversation history yet.");
+        }
+        else
+        {
+            ConsoleStyles.Header("Conversation History");
+            foreach (var msg in _conversationHistory)
+            {
+                var roleDisplay = msg.Role == "user" ? "You" : "Assistant";
+                ConsoleStyles.KeyValue(roleDisplay, msg.Content ?? "");
+            }
         }
         ConsoleStyles.Blank();
-        return options;
     }
 
     private void ResetPreferences()
@@ -332,9 +259,9 @@ public class InteractiveSession
         _preferences.Save();
     }
 
-    private LlmInferenceOptions CreateInferenceOptions()
+    private InferenceOptionsDto CreateInferenceOptions()
     {
-        return new LlmInferenceOptions
+        return new InferenceOptionsDto
         {
             MaxTokens = _preferences.MaxTokens
                 ?? _config.GetValue<int>("Inference:MaxTokens", 2048),
@@ -345,6 +272,84 @@ public class InteractiveSession
             RepeatPenalty = _preferences.RepeatPenalty
                 ?? _config.GetValue<float>("Inference:RepeatPenalty", 1.1f)
         };
+    }
+
+    private InferenceOptionsDto ConfigureSettings()
+    {
+        ConsoleStyles.Header("Settings", ConsoleStyles.Emoji.Gear);
+        ConsoleStyles.MenuItem(1, $"Max Tokens: {_options.MaxTokens}");
+        ConsoleStyles.MenuItem(2, $"Temperature: {_options.Temperature:F2}");
+        ConsoleStyles.MenuItem(3, $"Top-P: {_options.TopP:F2}");
+        ConsoleStyles.MenuItem(4, $"Repeat Penalty: {_options.RepeatPenalty:F2}");
+        ConsoleStyles.Blank();
+        ConsoleStyles.Muted("Select option to change (or press Enter to continue):");
+        ConsoleStyles.Prompt();
+
+        var choice = System.Console.ReadLine()?.Trim();
+        return choice switch
+        {
+            "1" => ConfigureMaxTokens(),
+            "2" => ConfigureTemperature(),
+            "3" => ConfigureTopP(),
+            "4" => ConfigureRepeatPenalty(),
+            _ => _options
+        };
+    }
+
+    private InferenceOptionsDto ConfigureMaxTokens()
+    {
+        ConsoleStyles.KeyValue("Max Tokens", $"[{_options.MaxTokens}]");
+        ConsoleStyles.Prompt();
+        if (int.TryParse(System.Console.ReadLine(), out var value) && value > 0)
+        {
+            _options = _options with { MaxTokens = value };
+            _preferences.MaxTokens = value;
+            _preferences.Save();
+        }
+        ConsoleStyles.Blank();
+        return _options;
+    }
+
+    private InferenceOptionsDto ConfigureTemperature()
+    {
+        ConsoleStyles.KeyValue("Temperature", $"[{_options.Temperature:F2}]");
+        ConsoleStyles.Prompt();
+        if (float.TryParse(System.Console.ReadLine(), out var value) && value >= 0 && value <= 2)
+        {
+            _options = _options with { Temperature = value };
+            _preferences.Temperature = value;
+            _preferences.Save();
+        }
+        ConsoleStyles.Blank();
+        return _options;
+    }
+
+    private InferenceOptionsDto ConfigureTopP()
+    {
+        ConsoleStyles.KeyValue("Top-P", $"[{_options.TopP:F2}]");
+        ConsoleStyles.Prompt();
+        if (float.TryParse(System.Console.ReadLine(), out var value) && value > 0 && value <= 1)
+        {
+            _options = _options with { TopP = value };
+            _preferences.TopP = value;
+            _preferences.Save();
+        }
+        ConsoleStyles.Blank();
+        return _options;
+    }
+
+    private InferenceOptionsDto ConfigureRepeatPenalty()
+    {
+        ConsoleStyles.KeyValue("Repeat Penalty", $"[{_options.RepeatPenalty:F2}]");
+        ConsoleStyles.Prompt();
+        if (float.TryParse(System.Console.ReadLine(), out var value) && value >= 1)
+        {
+            _options = _options with { RepeatPenalty = value };
+            _preferences.RepeatPenalty = value;
+            _preferences.Save();
+        }
+        ConsoleStyles.Blank();
+        return _options;
     }
 }
 
