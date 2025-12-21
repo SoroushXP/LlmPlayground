@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="7.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LlmPlayground.Core\LlmPlayground.Core.csproj" />
+    <ProjectReference Include="..\LlmPlayground.Prolog\LlmPlayground.Prolog.csproj" />
+    <ProjectReference Include="..\LlmPlayground.PromptLab\LlmPlayground.PromptLab.csproj" />
+    <ProjectReference Include="..\LlmPlayground.Services\LlmPlayground.Services.csproj" />
+    <ProjectReference Include="..\LlmPlayground.Utilities\LlmPlayground.Utilities.csproj" />
+  </ItemGroup>
+
+</Project>
+

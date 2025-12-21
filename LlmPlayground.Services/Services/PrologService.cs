@@ -24,7 +24,8 @@ public class PrologService : IPrologService
         var prologPath = section["ExecutablePath"];
         _workingDirectory = section["WorkingDirectory"];
 
-        _runner = new PrologRunner(prologPath);
+        // Pass null if the path is empty so PrologRunner will auto-detect
+        _runner = new PrologRunner(string.IsNullOrWhiteSpace(prologPath) ? null : prologPath);
     }
 
     /// <summary>
